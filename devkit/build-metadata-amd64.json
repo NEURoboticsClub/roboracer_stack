@@ -1,0 +1,43 @@
+{
+  "buildx.build.provenance": {
+    "builder": {
+      "id": ""
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/ros@humble?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "1813d3c85d7f96ff7d3012d865204583255740182db5d0065f8f8cd029a83138"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "entryPoint": "autodrive_devkit.Dockerfile"
+      },
+      "parameters": {
+        "frontend": "dockerfile.v0",
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ]
+      },
+      "environment": {
+        "platform": "linux/amd64"
+      }
+    }
+  },
+  "buildx.build.ref": "desktop-linux/desktop-linux/kqsyc84hbdbakmvy6ol313rvj",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "digest": "sha256:860e106156fe1016a8a20ced97e6d1466352793568d307dad958fd43239e5a4a",
+    "size": 856
+  },
+  "containerimage.digest": "sha256:860e106156fe1016a8a20ced97e6d1466352793568d307dad958fd43239e5a4a",
+  "image.name": "docker.io/dheeshik/roboracer_neu:devkit-amd64"
+}

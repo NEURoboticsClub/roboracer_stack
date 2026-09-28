@@ -1,0 +1,13 @@
+services:
+  onboard:
+    image: "dheeshik/roboracer_neu:onboard"
+    # ipc: host
+    ports:
+      - "8765:8765"
+  sim_api:
+    image: "autodriveecosystem/autodrive_roboracer_api:2026-iros-practice"
+    # ipc: host
+    privileged: true
+    ports:
+      - "4567:4567"
+    
