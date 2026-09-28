@@ -65,4 +65,5 @@ EXPOSE 4567
 
 # Set entrypoint
 COPY autodrive_devkit.sh /home
+RUN chmod +x /home/autodrive_devkit.sh
 ENTRYPOINT ["/home/autodrive_devkit.sh"]

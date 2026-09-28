@@ -22,9 +22,9 @@ autodrive_simulator_practice_[[YOUR_OPERATING_SYSTEM_HERE]].zip
 Make sure you have Docker Desktop open (or the docker daemon is running)
 
 Make sure you are in the root directory of the repository, then:
+>This will probably take a bit of time the first time it is run, but it'll be faster after that because of caching
 ```bash
-# This will probably take a bit of time the first time it is run, but it'll be faster after that because of caching
-docker build --tag roboracer_stack:onboard -f .\Onboard.Dockerfile .
+docker build --tag roboracer_stack:onboard -f ./Onboard.Dockerfile .
 ```
 
 
