@@ -1,11 +1,16 @@
 services:
   onboard:
-    image: "dheeshik/roboracer_neu:onboard"
+    build:
+      context: ./
+      dockerfile: Onboard.Dockerfile
+    
+    image: roboracer_stack:onboard
     # ipc: host
     ports:
       - "8765:8765"
-  sim_api:
+  devkit:
     image: "dheeshik/roboracer_neu:devkit"
+    pull_policy: always
     # ipc: host
     privileged: true
     ports:

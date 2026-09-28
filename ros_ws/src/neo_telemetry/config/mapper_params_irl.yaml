@@ -1,0 +1,111 @@
+slam_toolbox:
+  ros__parameters:
+
+    # Plugin params
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ROS Parameters
+    # Real-car TF chain:  map -> odom -> base_link -> cloud (lidar)
+    #   vesc_to_odom publishes     odom -> base_link  (wheel + steering odometry)
+    #   a static transform publishes  base_link -> cloud
+    #   slam_toolbox publishes     map -> odom         (the correction)
+    #
+    # base_link is the REAR AXLE, because that is the reference point
+    # vesc_to_odom's bicycle model integrates about. The lidar's forward offset
+    # from it lives in the base_link -> cloud static transform, in the launch
+    # file - if that offset is wrong, nothing tuned in this file will fix the
+    # smearing it causes.
+    use_sim_time: false
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    use_map_saver: true
+    mode: mapping #localization
+
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.02 #if 0 never publishes odometry
+    map_update_interval: 0.2
+    resolution: 0.05
+    max_laser_range: 20.0 #for rastering images
+    minimum_time_interval: 0.2
+    transform_timeout: 0.3
+    # How many scans the tf2 message filter may hold while it waits for the
+    # matching odom -> base_link transform. slam_toolbox defaults this to 1, and
+    # 1 only works if odometry is stamped at or AHEAD of the scan it came from.
+    #
+    # Measured on this car: rf2o stamps its transform a median 0.123 s (max
+    # 0.145 s) BEHIND the scan it was computed from, which is about two scan
+    # periods at 15 Hz. With a queue of 1, the next scan evicts the one still
+    # waiting before its transform ever arrives, so essentially every scan is
+    # thrown away - "discarding message because the queue is full" - and the map
+    # advances only on the rare scan that happens to squeak through. 10 slots is
+    # 0.67 s of buffer at 15 Hz, comfortably more than the wait needs.
+    #
+    # vesc_to_odom does not need this: it stamps its transform with now(), which
+    # is always ahead of the scan. Keep it anyway so switching odom_source does
+    # not silently break mapping.
+    scan_queue_size: 10
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000 #// program needs a larger stack size to serialize large maps
+    enable_interactive_mode: true
+
+    # General Parameters
+    use_scan_matching: true
+    use_scan_barycenter: true
+    # Keep keyframes dense. The car is quick (cruise is ~3.2 m/s) so 0.2 m is
+    # only a few scans apart at speed, and VESC odometry has no gyro - heading
+    # is integrated from the commanded steering angle, so it drifts steadily and
+    # wheelspin reads as distance. Dense keyframes keep each scan match a small
+    # correction instead of a big one.
+    minimum_travel_distance: 0.2
+    minimum_travel_heading: 0.17   # ~10 deg
+    scan_buffer_size: 20
+    scan_buffer_maximum_scan_distance: 20.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 4.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # Correlation Parameters - Correlation Parameters
+    correlation_search_space_dimension: 0.7
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # Correlation Parameters - Loop Closure Parameters
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # Scan Matcher Parameters
+    #
+    # These are VARIANCES used to penalize a scan match that disagrees with the
+    # odometry prior, so BIGGER means the prior is trusted LESS. The old 0.3/0.5
+    # were tightened below the slam_toolbox defaults for rf2o, which was a
+    # reasonable thing to do: rf2o derives its odometry from the same scans, so
+    # it rarely disagreed with the matcher and it was safe to lean on it.
+    #
+    # VESC odometry is genuinely independent, and genuinely worse - dead
+    # reckoning with no gyro, on a car that spins its wheels out of corners.
+    # Leaning on it that hard drags matches away from the correct alignment, so
+    # these go back to the slam_toolbox defaults and let the scan matcher win
+    # arguments.
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.524    # ~30 deg
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true

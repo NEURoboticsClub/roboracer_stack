@@ -32,12 +32,12 @@
       }
     }
   },
-  "buildx.build.ref": "desktop-linux/desktop-linux/kqsyc84hbdbakmvy6ol313rvj",
+  "buildx.build.ref": "desktop-linux/desktop-linux/iduspmj0uqstc9k7fv7vqlxdm",
   "containerimage.descriptor": {
     "mediaType": "application/vnd.oci.image.index.v1+json",
-    "digest": "sha256:860e106156fe1016a8a20ced97e6d1466352793568d307dad958fd43239e5a4a",
+    "digest": "sha256:8931c66a771dd33f3d2f1cbc41a0bbafabb3238be2e2c46218348efc413f81d8",
     "size": 856
   },
-  "containerimage.digest": "sha256:860e106156fe1016a8a20ced97e6d1466352793568d307dad958fd43239e5a4a",
+  "containerimage.digest": "sha256:8931c66a771dd33f3d2f1cbc41a0bbafabb3238be2e2c46218348efc413f81d8",
   "image.name": "docker.io/dheeshik/roboracer_neu:devkit-amd64"
 }

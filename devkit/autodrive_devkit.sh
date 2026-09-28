@@ -12,4 +12,4 @@ cd /home/autodrive_devkit
 # ros2 launch autodrive_roboracer bringup_graphics.launch.py
 
 # Launch AutoDRIVE Devkit Headless
-# ros2 launch autodrive_roboracer bringup_headless.launch.py
+exec ros2 launch autodrive_roboracer bringup_headless.launch.py
