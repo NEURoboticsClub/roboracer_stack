@@ -1,0 +1,14 @@
+# 1. Handle text files automatically and normalize them to LF in the repo
+* text=auto
+
+# 2. Explicitly force LF on checkout for all text files
+* text eol=lf
+
+# 3. Force CRLF for specific Windows-only files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 4. Explicitly mark binary files so Git doesn't touch them
+*.png binary
+*.jpg binary
+*.gif binary
