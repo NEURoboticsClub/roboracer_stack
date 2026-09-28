@@ -5,7 +5,7 @@ services:
     ports:
       - "8765:8765"
   sim_api:
-    image: "autodriveecosystem/autodrive_roboracer_api:2026-iros-practice"
+    image: "dheeshik/roboracer_neu:devkit"
     # ipc: host
     privileged: true
     ports:
