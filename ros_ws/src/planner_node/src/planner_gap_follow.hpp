@@ -1,6 +1,4 @@
 #pragma once
 
-#include "visualization_msgs/msg/marker.hpp"
-#include "visualization_msgs/msg/marker_array.hpp"
-
+// Angle (radians) of lidar beam `index`: 0 = straight ahead, positive = LEFT.
 float ind2angle(int index);
