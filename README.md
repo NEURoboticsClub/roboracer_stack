@@ -1,55 +1,75 @@
-# First Steps:
-## 1. Install Git LFS (Large File Support) and the Simulator Application
+# RoboRacer Stack
 
-Windows:
+## Setup
+
+### 1. Install Git LFS and the Simulator
+
+#### Git LFS (Large File Storage)
+
+**Windows** (Git LFS comes with Git for Windows):
+
 ```bash
 git lfs install
 ```
 
-Mac:
+**macOS:**
+
 ```bash
 brew install git-lfs
 ```
 
-
-### Go to this [link](https://github.com/AutoDRIVE-Ecosystem/AutoDRIVE-RoboRacer-Sim-Racing/releases/tag/2026-iros) and download the zip file that matches your operating system and make sure it looks like:
 ```bash
-autodrive_simulator_practice_[[YOUR_OPERATING_SYSTEM_HERE]].zip
+git lfs install
 ```
-> ** ONLY THE "PRACTICE" VERSION OF THE SIMULATOR WILL WORK **
 
-## 2. Build the Onboard Docker Image Locally on your Computer
-Make sure you have Docker Desktop open (or the docker daemon is running)
+#### Simulator
 
-Make sure you are in the root directory of the repository, then:
->This will probably take a bit of time the first time it is run, but it'll be faster after that because of caching
+Go to the [AutoDRIVE RoboRacer Sim Racing release page](https://github.com/AutoDRIVE-Ecosystem/AutoDRIVE-RoboRacer-Sim-Racing/releases/tag/2026-iros) and download the zip file that matches your operating system. It should be named like this:
+
+```text
+autodrive_simulator_practice_<YOUR_OPERATING_SYSTEM>.zip
+```
+
+> [!IMPORTANT]
+> Only the **practice** version of the simulator will work.
+
+### 2. Build the Onboard Docker Image
+
+Make sure Docker Desktop is open (or the Docker daemon is running). Then, from the root directory of the repository, run:
+
 ```bash
 docker build --tag roboracer_stack:onboard -f ./Onboard.Dockerfile .
 ```
 
+> [!NOTE]
+> The first build will take a while. Later builds are faster because of caching.
 
-## 3. Run the Autonomy Stack and the Devkit
+### 3. Run the Autonomy Stack and the Devkit
+
 ```bash
 docker compose up
 ```
 
-## 4. Launch the Simulator App
-Unzip the simulator folder that you downloaded, then open the app. On Windows and Linux you should be good.
+### 4. Launch the Simulator
 
-On macos you should follow this guide to get it up and running:
+Unzip the simulator folder you downloaded, then open the app.
 
-#### AutoDRIVE Simulator – macOS Setup:
+- **Windows and Linux:** you're good to go.
+- **macOS:** follow the [macOS setup guide](#macos-simulator-setup) below.
 
-The macOS zip was built on Windows, so extracting it **loses the executable bit**, and
-macOS **quarantines** the downloaded app. Either one causes "The application cannot be
-opened" or "app is damaged". These commands fix both.
+---
 
-Works on Apple Silicon and Intel Macs (the binary is universal).
+## macOS Simulator Setup
 
-## 1. Unzip
+The macOS zip was built on Windows, so extracting it **loses the executable bit**, and macOS **quarantines** the downloaded app. Either one causes "The application cannot be opened" or "app is damaged" errors. The steps below fix both.
+
+These steps work on both Apple Silicon and Intel Macs (the binary is universal).
+
+### Step 1: Unzip
+
+Go to wherever you downloaded the file:
 
 ```bash
-# cd wherever you have the file downloaded
 cd ~/Downloads
 ```
 
@@ -57,10 +77,11 @@ cd ~/Downloads
 unzip -q "autodrive_simulator_practice_macos.zip"
 ```
 
-> Adjust the zip name if yours is different, e.g. `autodrive_simulator_practice_macos (3).zip`.
-> Use `unzip` in Terminal, not Finder's double-click. It makes the next steps more reliable.
+> [!TIP]
+> - Adjust the zip name if yours is different, e.g. `autodrive_simulator_practice_macos (3).zip`.
+> - Use `unzip` in Terminal, not a double-click in Finder. It makes the next steps more reliable.
 
-## 2. Fix permissions, quarantine, and signature
+### Step 2: Fix permissions, quarantine, and signature
 
 ```bash
 cd ~/Downloads/autodrive_simulator
@@ -72,19 +93,19 @@ Make the executable runnable:
 chmod -R +x "AutoDRIVE Simulator.app/Contents/MacOS"
 ```
 
-Remove the quarantine flag (recursively, from every file in the bundle):
+Remove the quarantine flag from every file in the bundle:
 
 ```bash
 xattr -dr com.apple.quarantine "AutoDRIVE Simulator.app"
 ```
 
-Re-sign the app locally. This is a safe fallback in case the bundled ad-hoc signature doesn't survive extraction. Apple Silicon Macs won't run an arm64 binary with an invalid signature:
+Re-sign the app locally. This is a safe fallback in case the bundled ad-hoc signature doesn't survive extraction, since Apple Silicon Macs won't run an arm64 binary with an invalid signature:
 
 ```bash
 codesign --force --deep --sign - "AutoDRIVE Simulator.app"
 ```
 
-## 3. Run
+### Step 3: Run
 
 ```bash
 open "AutoDRIVE Simulator.app"
@@ -92,12 +113,13 @@ open "AutoDRIVE Simulator.app"
 
 Or double-click the app in Finder.
 
-## Troubleshooting
+### Troubleshooting
 
-- **Still blocked by Gatekeeper:** go to System Settings → Privacy & Security, scroll down,
-  and click **Open Anyway** next to the AutoDRIVE message. Or right-click the app and choose **Open**.
+- **Still blocked by Gatekeeper:** go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the AutoDRIVE message. Or right-click the app and choose **Open**.
 - **Check that it's running:**
+
   ```bash
   pgrep -fl "AutoDRIVE Simulator"
   ```
+
 - **Permission denied on `chmod`:** put `sudo` in front of the command.
