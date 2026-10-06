@@ -4,7 +4,7 @@ set -e
 # Setup Development Environment
 source /opt/ros/humble/setup.bash
 cd /home/ros_ws
-colcon build
+colcon build --symlink-install
 source /home/ros_ws/install/setup.bash
 
 # AutoDRIVE Devkit Workspace

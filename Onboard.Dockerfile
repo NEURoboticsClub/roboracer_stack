@@ -76,7 +76,7 @@ RUN apt update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN . /opt/ros/$ROS_DISTRO/setup.sh \
-    && cd /home/ros_ws && colcon build
+    && cd /home/ros_ws && colcon build --symlink-install
 
 
 # Set work directory and expose port
