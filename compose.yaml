@@ -8,6 +8,8 @@ services:
     # ipc: host
     ports:
       - "8765:8765"
+    volumes:
+      - ./ros_ws/src:/home/ros_ws/src
   devkit:
     image: "dheeshik/roboracer_neu:devkit"
     pull_policy: always

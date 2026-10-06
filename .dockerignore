@@ -1,0 +1,10 @@
+# Host-side colcon output must never be baked into the image; the image
+# builds its own workspace.
+ros_ws/build/
+ros_ws/install/
+ros_ws/log/
+**/__pycache__/
+**/*.py[cod]
+
+# Not needed by Onboard.Dockerfile; keeps the build context small.
+.git/
