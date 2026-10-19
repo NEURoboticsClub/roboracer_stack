@@ -44,6 +44,7 @@ RUN apt update && apt install -y --no-install-recommends \
     ros-$ROS_DISTRO-nav2-bringup \
     ros-$ROS_DISTRO-ament-cmake \
     ros-$ROS_DISTRO-slam-toolbox \
+    ros-$ROS_DISTRO-cartographer-ros \
     ros-$ROS_DISTRO-nav2-lifecycle-manager
 
 

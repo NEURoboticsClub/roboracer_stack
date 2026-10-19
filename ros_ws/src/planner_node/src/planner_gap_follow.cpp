@@ -33,12 +33,22 @@
 float angleIncrement = 0.0f;
 float angleMin = -2.35619f; // updated from the scan each callback
 std::string scanFrame = "cloud"; // updated from the scan each callback
+// Header stamp of the scan being processed, in seconds; 0 when the publisher
+// leaves it unset. Updated from the scan each callback.
+double scanStampSec = 0.0;
 
 // Corner-detection geometry. Set once from node parameters at startup so they
 // can be tuned trackside; see the comment at the clearance check for why the
 // defaults are what they are.
 float front_cone_half_angle = 20.0f * static_cast<float>(M_PI) / 180.0f;
 float corner_distance = 2.0f;
+// Clearance at which Cruise starts easing off toward corner speed. Between here
+// and corner_distance the throttle ramps linearly; at or below corner_distance
+// it is the Corner state's. Equal to corner_distance (the default) means no
+// ramp - the old step from full cruise straight to corner speed.
+float slowdown_distance = 2.0f;
+// Corridor clearance from the latest scan, for the throttle ramp to read.
+float front_clearance_m = 10.0f;
 // Half-width of the lane the car needs clear to keep driving straight. Anything
 // further off the centerline than this goes past the car rather than into it.
 // 0.18 m is the car's 0.15 m half-width plus a thin margin: 0.15 is a hard
@@ -51,6 +61,17 @@ float corridor_half_width = 0.18f;
 float min_gap_depth = 0.8f;
 float min_gap_width = 0.40f;
 float deep_band = 0.20f;
+// Radius the disparity extender pads every near edge by. See step 2.
+float bubble_radius = 0.22f;
+// Lateral distance inside which a wall ALONGSIDE the car vetoes turning toward
+// it; 0 disables the check. See the side check after the aim point.
+float side_clearance = 0.0f;
+
+// Closing-speed brake, also set from node parameters at startup. See the
+// clearance check for how the three interact.
+float brake_activation_distance = 3.0f;
+float brake_closing_speed = 0.8f; // m/s toward the wall: engage
+float brake_release_speed = 0.2f; // m/s toward the wall: release
 
 // What the planner wants the drivetrain to do this frame. This is the ONLY
 // throttle decision either stack sees: the node turns it into a single
@@ -320,10 +341,10 @@ std_msgs::msg::Float32 findDisparities(float threshold, const std::vector<float>
   //    clean_ranges so chained bubbles don't cascade, exactly as before.
   auto &disp = g_array.markers[DISP];
   disp.points.clear();
-  // ~car half-width (0.15 m) plus margin. The extra margin over a bare
-  // half-width pushes the center of the chosen gap further off the inner wall,
-  // which is what stops the car from clipping the apex on a tight turn.
-  const float bubble_radius = 0.22f;
+  // bubble_radius (a node parameter) is ~car half-width (0.15 m) plus margin.
+  // The extra margin over a bare half-width pushes the center of the chosen gap
+  // further off the inner wall, which is what stops the car from clipping the
+  // apex on a tight turn.
   // A close obstacle subtends a huge half-angle (atan2 -> ~50 deg at 0.3 m),
   // which would smear the bubble across open space. Cap how wide a single
   // disparity may block.
@@ -502,6 +523,40 @@ std_msgs::msg::Float32 findDisparities(float threshold, const std::vector<float>
   }
 
   float target_angle = ind2angle(target_idx);
+
+  // 3c. Side check. The aim point only keeps the LIDAR clear of the apex, but
+  //     the car pivots about its rear axle 0.27 m behind the scanner, so the
+  //     body sweeps inside the path the scanner traces. With the inner wall
+  //     already alongside, turning further in drags the flank into it - which
+  //     is the corner-cutting crash. So if anything sits beside the car (from
+  //     its rear bumper to just past the scanner) within side_clearance of its
+  //     centerline, refuse to turn toward that side and hold straight until the
+  //     body has cleared it. Uses clean_ranges for the same reason the
+  //     clearance check below does: a bubbled beam is shortened along its ray
+  //     and would fake a close side wall.
+  if (side_clearance > 0.0f && n > 0)
+  {
+    bool left_close = false, right_close = false;
+    for (size_t p = 0; p < n; p++)
+    {
+      const float forward = clean_ranges[p] * cos_table[p];
+      const float lateral = clean_ranges[p] * sin_table[p];
+      if (forward < -0.40f || forward > 0.15f || std::abs(lateral) > side_clearance)
+        continue;
+      if (lateral > 0.0f)
+        left_close = true;
+      else
+        right_close = true;
+    }
+
+    if ((target_angle > 0.0f && left_close) || (target_angle < 0.0f && right_close))
+    {
+      target_angle = 0.0f;
+      target_idx = std::clamp(
+        static_cast<int>(std::lround(-angleMin / angleIncrement)), 0, static_cast<int>(n) - 1);
+    }
+  }
+
   auto &head = g_array.markers[HEAD];
   float len = proc_ranges[target_idx] > 0.0f ? proc_ranges[target_idx] : 4.0f;
   head.points[0] = geometry_msgs::msg::Point();
@@ -530,15 +585,13 @@ std_msgs::msg::Float32 findDisparities(float threshold, const std::vector<float>
   //    WHAT the car should do, and the node's output layer decides how to say it
   //    to whichever stack is built in.
   //
-  //    Cone width and trigger distance come from node parameters so they can be
-  //    tuned trackside without a rebuild. The old hardcoded values (+-5 deg at
-  //    1.0 m) were both too narrow and too late: at 1 m that cone spans 0.17 m,
-  //    narrower than the car, so a wall approached at an angle slipped past it
-  //    entirely, and the measured 0.965 m turning radius needs ~1.5 m of arc to
-  //    come round 90 deg - by 1 m the car is already committed.
-  const float brake_activation_distance = 3.0f;
-  const float fast_closing_speed = 0.8f; // m/s toward the wall
-  const float slow_closing_speed = 0.2f; // m/s release threshold
+  //    Cone width, trigger distance and the brake thresholds all come from node
+  //    parameters so they can be tuned trackside without a rebuild. The old
+  //    hardcoded cone (+-5 deg at 1.0 m) was both too narrow and too late: at
+  //    1 m it spans 0.17 m, narrower than the car, so a wall approached at an
+  //    angle slipped past it entirely, and the measured 0.965 m turning radius
+  //    needs ~1.5 m of arc to come round 90 deg - by 1 m the car is already
+  //    committed.
 
   // Clearance is the distance to the nearest thing in the car's CORRIDOR, not
   // the nearest thing anywhere in the cone. A wall running alongside the car
@@ -580,43 +633,68 @@ std_msgs::msg::Float32 findDisparities(float threshold, const std::vector<float>
   static float previous_front_clearance = max_scan_range;
   static float filtered_closing_speed = 0.0f;
   static bool closing_brake_active = false;
-  static auto previous_clearance_time = std::chrono::steady_clock::now();
-  const auto now = std::chrono::steady_clock::now();
+  static double previous_clearance_time = 0.0;
+
+  // Time the derivative by when the scan was TAKEN, not when it arrived. A
+  // bridge that delivers scans in bursts (the AutoDRIVE websocket does) puts
+  // two scans a few ms apart on arrival, and 2 cm of noise over 5 ms reads as
+  // 4 m/s of closing speed - enough to trip the brake on a straight. The
+  // steady clock is only the fallback for a publisher that leaves the stamp
+  // unset.
+  const double now = scanStampSec > 0.0
+    ? scanStampSec
+    : std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
   // Positive closing speed means the measured wall distance is shrinking.
   // Filter the derivative, engage braking at a high threshold, and release it
   // at a lower threshold so scan noise cannot rapidly toggle the brake.
   if (has_front_reading)
   {
+    bool take_sample = true;
     if (have_previous_clearance)
     {
-      const float elapsed_sec = std::chrono::duration<float>(
-        now - previous_clearance_time).count();
-      if (elapsed_sec > 0.001f && elapsed_sec < 1.0f)
+      const double elapsed_sec = now - previous_clearance_time;
+      if (elapsed_sec <= 0.001)
+      {
+        // Duplicate or out-of-order stamp: no time has passed, so there is no
+        // speed to measure. Keep the previous sample as the baseline rather
+        // than resetting, which would drop an active brake on a stamp glitch.
+        take_sample = false;
+      }
+      else if (elapsed_sec < 1.0)
       {
         const float raw_closing_speed =
-          (previous_front_clearance - front_clearance) / elapsed_sec;
+          (previous_front_clearance - front_clearance) / static_cast<float>(elapsed_sec);
         const float filter_gain = 0.4f;
         filtered_closing_speed +=
           filter_gain * (raw_closing_speed - filtered_closing_speed);
       }
       else
       {
+        // Stale baseline (lidar stalled, or the clock jumped).
         filtered_closing_speed = 0.0f;
         closing_brake_active = false;
       }
     }
 
-    previous_front_clearance = front_clearance;
-    previous_clearance_time = now;
-    have_previous_clearance = true;
+    if (take_sample)
+    {
+      previous_front_clearance = front_clearance;
+      previous_clearance_time = now;
+      have_previous_clearance = true;
+    }
 
+    // Closing speed on a head-on approach is just the car's own speed, so the
+    // release threshold is effectively "brake until the car is this slow".
+    // Set it near zero and every corner entry becomes a near-stop; set it a
+    // little under the engage threshold and the brake only trims the excess.
     if (front_clearance <= brake_activation_distance &&
-        filtered_closing_speed >= fast_closing_speed)
+        filtered_closing_speed >= brake_closing_speed)
     {
       closing_brake_active = true;
     }
-    else if (filtered_closing_speed <= slow_closing_speed ||
+    else if (filtered_closing_speed <= brake_release_speed ||
              front_clearance > brake_activation_distance)
     {
       closing_brake_active = false;
@@ -628,6 +706,8 @@ std_msgs::msg::Float32 findDisparities(float threshold, const std::vector<float>
     filtered_closing_speed = 0.0f;
     closing_brake_active = false;
   }
+
+  front_clearance_m = front_clearance;
 
   if (!has_front_reading)
     drive_state = DriveState::Coast;
@@ -702,6 +782,12 @@ public:
     front_cone_half_angle = static_cast<float>(
       declare_parameter<double>("front_cone_half_angle_deg", 20.0) * M_PI / 180.0);
     corner_distance = static_cast<float>(declare_parameter<double>("corner_distance", 2.0));
+    // Start slowing this far out so a faster cruise has room to shed speed
+    // before the corner. Defaults to corner_distance (no ramp).
+    slowdown_distance = static_cast<float>(
+      declare_parameter<double>("slowdown_distance", corner_distance));
+    if (slowdown_distance < corner_distance)
+      slowdown_distance = corner_distance;
     // Car half-width (0.15 m) plus a thin margin. Raise it to make the car treat
     // a narrowing section as a corner sooner; lower it to hold cruise speed
     // through tighter gaps. Do not go below 0.15 - see the global's comment.
@@ -725,6 +811,36 @@ public:
     // individual beams; higher is smoother but drifts back toward the old
     // aim-at-the-midpoint behavior. See the measurements at the aim-point code.
     deep_band = static_cast<float>(declare_parameter<double>("deep_band", 0.20));
+    // Padding the disparity extender adds around every near edge: car half-width
+    // plus margin. Raise it to hold the car further off an inside apex.
+    bubble_radius = static_cast<float>(declare_parameter<double>("bubble_radius", 0.22));
+    // Veto turning toward a wall closer than this beside the car. 0.0 (the
+    // default, so the real car is unchanged) disables it; car half-width plus a
+    // margin is the sensible range.
+    side_clearance = static_cast<float>(declare_parameter<double>("side_clearance", 0.0));
+
+    // Closing-speed brake (globals: findDisparities reads them directly).
+    //
+    // The brake engages when something in the corridor is within
+    // brake_activation_distance AND approaching at brake_closing_speed or
+    // faster, and releases once it is approaching at brake_release_speed or
+    // slower. Keep the activation distance at or near corner_distance: further
+    // out than that, the brake fires before the car has even slowed for the
+    // corner. The defaults are the real car's original values.
+    brake_activation_distance = static_cast<float>(
+      declare_parameter<double>("brake_activation_distance", 3.0));
+    brake_closing_speed = static_cast<float>(
+      declare_parameter<double>("brake_closing_speed", 0.8));
+    brake_release_speed = static_cast<float>(
+      declare_parameter<double>("brake_release_speed", 0.2));
+    if (brake_release_speed > brake_closing_speed)
+    {
+      RCLCPP_WARN(
+        get_logger(), "brake_release_speed %.2f > brake_closing_speed %.2f - "
+        "clamping release to engage, which removes the hysteresis.",
+        brake_release_speed, brake_closing_speed);
+      brake_release_speed = brake_closing_speed;
+    }
 
     invert_steering_ = declare_parameter<bool>("invert_steering", false);
     // Servo range in the VESC's normalized 0..1 units. Defaults match
@@ -760,6 +876,7 @@ public:
       angleIncrement = scan->angle_increment;
       angleMin = scan->angle_min;
       scanFrame = scan->header.frame_id;
+      scanStampSec = rclcpp::Time(scan->header.stamp).seconds();
 
       // findDisparities only decides; it updates the global drive_state and
       // returns the steering angle. Everything actuator-facing happens below.
@@ -927,6 +1044,13 @@ private:
   // into a gap that is wide open but too tight to actually arc into at speed;
   // downgrading Cruise to Corner on steering alone is what stops the car running
   // wide. Only Cruise is downgraded - Brake and Coast are already slower.
+  // Corner speed as a fraction of cruise, so the round trip through the VESC
+  // branch below lands exactly back on corner_erpm_.
+  float cornerFraction() const
+  {
+    return cruise_erpm_ > 0.0 ? static_cast<float>(corner_erpm_ / cruise_erpm_) : 0.0f;
+  }
+
   float throttleForState(DriveState state, float steering_angle) const
   {
     if (state == DriveState::Cruise && max_steer_angle_ > 0.0)
@@ -940,12 +1064,19 @@ private:
     switch (state)
     {
       case DriveState::Cruise:
-        return 1.0f;
+      {
+        // Ease off with distance to the corner: full cruise beyond
+        // slowdown_distance, falling linearly to corner speed at
+        // corner_distance, where the Corner state takes over at that same
+        // value - so the throttle never steps as the car closes in.
+        const float span = slowdown_distance - corner_distance;
+        if (span <= 0.0f)
+          return 1.0f;
+        const float t = std::clamp((front_clearance_m - corner_distance) / span, 0.0f, 1.0f);
+        return cornerFraction() + t * (1.0f - cornerFraction());
+      }
       case DriveState::Corner:
-        // Corner speed as a fraction of cruise, so the round trip through the
-        // VESC branch below lands exactly back on corner_erpm_.
-        return cruise_erpm_ > 0.0
-          ? static_cast<float>(corner_erpm_ / cruise_erpm_) : 0.0f;
+        return cornerFraction();
       case DriveState::Brake:
         return -1.0f;
       case DriveState::Coast:
@@ -1078,7 +1209,7 @@ private:
   double servo_max_ = 0.895;
   double sim_cruise_throttle_ = 0.1;
   double sim_throttle_floor_ = 0.1;
-  double sim_brake_throttle_ = -0.05;
+  double sim_brake_throttle_ = 0.05;
   double sim_steer_sign_ = 1.0;
   // Stopped by default: nothing moves until the estop console releases it.
   // Only consulted in output_mode:=vesc - the sim has no e-stop console.
