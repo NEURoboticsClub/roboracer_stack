@@ -16,7 +16,7 @@
 //
 // SPACE in the e-stop console stops the car, same as always.
 //
-// Do NOT run this alongside planner_gap_follow: both publish to
+// Do NOT run this alongside the planner: both publish to
 // /commands/servo/position and /commands/motor/speed, and they will fight over
 // the car. This node warns if it sees another publisher on the servo topic.
 //
@@ -124,7 +124,7 @@ private:
     if (count_publishers("/commands/servo/position") > 1)
       RCLCPP_WARN_THROTTLE(
         get_logger(), steady_clock_, 3000,
-        "Another node is publishing servo commands - is planner_gap_follow running? "
+        "Another node is publishing servo commands - is the planner running? "
         "Stop it: the circle test needs the car to itself.");
 
     std_msgs::msg::Float64 msg;

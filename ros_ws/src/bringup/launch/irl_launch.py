@@ -16,10 +16,10 @@ from launch_ros.actions import Node
 # slam_toolbox cannot fully paper over - the map comes out stretched, sheared,
 # or mirrored.
 #
-# speed_to_erpm_gain       eRPM per m/s. Sanity check against the planner's own
-#                          speeds below: 15000 cruise -> 3.25 m/s, 7000 corner
-#                          -> 1.52 m/s, 5000 brake -> 1.08 m/s. Those are
-#                          believable for this car, but this is the ONE value
+# speed_to_erpm_gain       eRPM per m/s. Sanity check against the speeds below:
+#                          15000 max throttle -> 3.25 m/s, and the 5000 the VESC
+#                          reliably holds -> 1.08 m/s. Those are believable
+#                          for this car, but this is the ONE value
 #                          here NOT measured on it - see CALIBRATING SCALE at
 #                          the bottom of this file.
 #
@@ -37,11 +37,11 @@ from launch_ros.actions import Node
 #                          vesc_config.yaml); the stock f1tenth 0.5304 is some
 #                          other car's trim. With this car's 0.117/0.895 servo
 #                          limits, 0.500 and the gain below put full lock at
-#                          18.1-18.6 deg - which is exactly the 18.6 deg the
-#                          planner has measured on the car.
+#                          18.1-18.6 deg - which is exactly the 18.6 deg
+#                          measured on the car.
 #
 # wheelbase                Front-to-rear axle spacing, meters. Derived from the
-#                          planner's two measured numbers rather than guessed:
+#                          car's two measured numbers rather than guessed:
 #                          R = L / tan(delta), so L = 0.965 * tan(18.6 deg)
 #                          = 0.325 m. (The vendored vesc_ackermann launch file
 #                          ships 0.2, which is nobody's car - do not copy it.)
@@ -57,8 +57,8 @@ def generate_launch_description():
   # -------------------------------------------------------------------------
   # MAPPING IS DISABLED IN THIS LAUNCH FILE (race configuration).
   #
-  # planner_gap_follow is purely reactive - it subscribes to /scan and /estop and
-  # nothing else, with no odometry, no TF lookups and no nav_msgs dependency. So
+  # The planner subscribes to /scan and /estop and nothing else, with no
+  # odometry, no TF lookups and no nav_msgs dependency. So
   # SLAM and the odometry that feeds it were pure overhead during a race, and the
   # Jetson's CPU is better spent on the lidar and the control loop.
   #
@@ -147,9 +147,8 @@ def generate_launch_description():
       #
       # That matters far more than it looks. The SICK encodes a no-return as 0.0,
       # and with range_min=0.0 nothing downstream filters it: those beams become
-      # valid points AT THE SENSOR ORIGIN. planner_gap_follow already works
-      # around this in its own preprocessing, but rf2o and slam_toolbox consume
-      # the raw scan and do not:
+      # valid points AT THE SENSOR ORIGIN. rf2o and slam_toolbox consume the raw
+      # scan and do not filter them:
       #   - rf2o solves a dense range-flow least squares weighted BY RANGE
       #     GRADIENT, and a 0.0 sitting next to a 5 m return is an enormous
       #     spurious gradient, so a dozen junk beams can dominate the fit.
@@ -161,8 +160,8 @@ def generate_launch_description():
       # handicapped at correcting it.
       #
       # handling 5 = RANGE_FILTER_TO_NAN, the ROS convention for "no return".
-      # Both consumers discard NaN, and the planner already maps non-finite to
-      # open space, so its behaviour does not change.
+      # Both consumers discard NaN. An algorithm in planner_node sees these beams
+      # as NaN too, so it has to handle them itself.
       "range_min:=0.05",
       "range_max:=25.0",
       "range_filter_handling:=5",
@@ -177,7 +176,6 @@ def generate_launch_description():
   #   - topics: /map       occupancy grid from slam_toolbox
   #             /scan      live lidar
   #             /odom      the VESC dead-reckoned pose
-  #             /visualization_markers   the planner's chosen gap + heading
   foxglove_node = Node(
     package="foxglove_bridge",
     executable="foxglove_bridge",
@@ -202,8 +200,8 @@ def generate_launch_description():
   #   /commands/motor/brake   (amps)
   #   /commands/servo/position (0..1 -> PPM pulse on the VESC servo header)
   #
-  # The planner picks its own speed from the lidar (cruise / corner / brake). It
-  # is STOPPED unless killswitch_node (below) says otherwise, so the operator's
+  # The algorithm (src/algorithm.cpp) picks steering and throttle from the lidar.
+  # It is STOPPED unless killswitch_node (below) says otherwise, so the operator's
   # handheld remote has to be armed before anything moves.
   #
   # The old keyboard console (ros2 run planner_node estop) still exists for bench
@@ -220,28 +218,18 @@ def generate_launch_description():
   # "the planner or the VESC is down", not a SLAM problem.
   planning_node = Node(
     package='planner_node',
-    executable='planner_gap_follow',
+    executable='planner',
     output='screen',
     parameters=[{
-      # Electrical RPM = mechanical RPM x motor pole pairs. The VESC speed PID
-      # has a minimum ERPM below which it will not START the motor: 2000
-      # measured as a no-op on this car, 5000 holds cleanly at ~4.4 A. So 5000
-      # anchors the set - corner sits on it, straight-line reaches past it, and
-      # braking drops below it while staying well clear of the dead zone.
-      'cruise_erpm': 15000.0,   # straight-line max
-      'corner_erpm': 7000.0,   # tight clearance ahead 
-      'brake_erpm': 5000.0,    # closing on a wall: wind down, don't lock up
-      'brake_current': 4.0,    # hard stop only (e-stop / Ctrl+C)
-
-      # Half-width (m) of the lane the car needs clear ahead to stay at
-      # cruise_erpm. Only obstacles within this band of the centerline count as
-      # blocking; walls further out are passing the car down the side, which is
-      # what keeps narrow-but-straight sections at straight-line speed.
-      #
-      # The car is 0.30 m wide, so 0.15 is a hard floor - going under it means
-      # the check ignores things the car will physically hit. Raise it toward
-      # 0.25-0.30 if the car carries too much speed into a narrowing section.
-      'corridor_half_width': 0.18,
+      # Electrical RPM = mechanical RPM x motor pole pairs. This is what the
+      # algorithm's throttle +1.0 becomes. The VESC speed PID has a minimum ERPM
+      # below which it will not START the motor: 2000 measured as a no-op on this
+      # car, 5000 holds cleanly at ~4.4 A. So at 15000, a throttle under ~0.33
+      # may not move the car at all.
+      'irl_max_throttle_erpm': 15000.0,
+      # What the algorithm's throttle -1.0 becomes, in amps. Also the planner's
+      # hard stop (e-stop / Ctrl+C).
+      'irl_max_brake_amps': 4.0,
     }],
   )
 
@@ -264,7 +252,7 @@ def generate_launch_description():
     parameters=[{
       'port': 5005,
       # 400 ms rides out an ordinary WiFi hiccup without ending a run, and caps
-      # the worst case at ~1.3 m of travel at cruise. Tune from the measured
+      # the worst case at ~1.3 m of travel at max throttle. Tune from the measured
       # stop time in the WiFi-drop test.
       'timeout_ms': 400,
       # Must match --token on the laptop. Its job is narrow: at a competition

@@ -9,20 +9,19 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(visualization_msgs REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
-add_executable(planner_gap_follow src/planner_gap_follow.cpp)
-target_include_directories(planner_gap_follow PUBLIC
+# Lidar in, drive command out. algorithm.cpp is the part to edit.
+add_executable(planner src/planner.cpp src/algorithm.cpp)
+target_include_directories(planner PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
-target_compile_features(planner_gap_follow PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(planner PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 target_link_libraries(
-  planner_gap_follow
+  planner
   ${rclcpp_TARGETS}
   ${sensor_msgs_TARGETS}
-  ${visualization_msgs_TARGETS}
   ${ackermann_msgs_TARGETS}
 )
 
@@ -57,7 +56,7 @@ target_link_libraries(
   ${std_msgs_TARGETS}
 )
 
-install(TARGETS planner_gap_follow estop killswitch circle_test
+install(TARGETS planner estop killswitch circle_test
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

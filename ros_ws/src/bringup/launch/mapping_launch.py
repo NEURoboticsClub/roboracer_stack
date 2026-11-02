@@ -3,12 +3,12 @@
 
 This is NOT the racing launch. Everything here is traded away from lap time and
 toward a map that closes cleanly:
-  - the car crawls at ~1.1-1.3 m/s instead of ~3.2 m/s
-  - it drives a CENTRED line rather than hugging apexes
+  - throttle +1.0 is a crawl at ~1.3 m/s instead of ~3.2 m/s
   - slam_toolbox gets a wider scan-match window and a denser pose graph
     (config/mapper_params_mapping.yaml)
 
-Use irl_launch.py to actually drive the track.
+Use irl_launch.py to actually drive the track. The car only moves if the
+algorithm in planner_node's src/algorithm.cpp drives it.
 
     HOW TO RUN
 
@@ -144,10 +144,10 @@ def generate_launch_description():
   # this car, 5000 holds cleanly at ~4.4 A - so 5000 (~1.08 m/s) is the floor,
   # not a choice. Going lower does not give a slower lap, it gives a lap that
   # stalls. 6000 eRPM is ~1.3 m/s via SPEED_TO_ERPM_GAIN.
-  cruise_erpm_arg = DeclareLaunchArgument(
-    "cruise_erpm",
+  max_throttle_arg = DeclareLaunchArgument(
+    "irl_max_throttle_erpm",
     default_value="6000.0",
-    description="Straight-line speed for the mapping lap, in electrical RPM. "
+    description="Speed at throttle +1.0 for the mapping lap, in electrical RPM. "
                 "Do not go below 5000 - the VESC will not start the motor.",
   )
 
@@ -181,9 +181,8 @@ def generate_launch_description():
       #
       # That matters far more than it looks. The SICK encodes a no-return as 0.0,
       # and with range_min=0.0 nothing downstream filters it: those beams become
-      # valid points AT THE SENSOR ORIGIN. planner_gap_follow already works
-      # around this in its own preprocessing, but rf2o and slam_toolbox consume
-      # the raw scan and do not:
+      # valid points AT THE SENSOR ORIGIN. rf2o and slam_toolbox consume the raw
+      # scan and do not filter them:
       #   - rf2o solves a dense range-flow least squares weighted BY RANGE
       #     GRADIENT, and a 0.0 sitting next to a 5 m return is an enormous
       #     spurious gradient, so a dozen junk beams can dominate the fit.
@@ -195,8 +194,8 @@ def generate_launch_description():
       # handicapped at correcting it.
       #
       # handling 5 = RANGE_FILTER_TO_NAN, the ROS convention for "no return".
-      # Both consumers discard NaN, and the planner already maps non-finite to
-      # open space, so its behaviour does not change.
+      # Both consumers discard NaN. An algorithm in planner_node sees these beams
+      # as NaN too, so it has to handle them itself.
       "range_min:=0.05",
       "range_max:=25.0",
       "range_filter_handling:=5",
@@ -219,47 +218,16 @@ def generate_launch_description():
     }],
   )
 
-  # The planner, detuned for mapping. Same node as the racing launch - the car
-  # still drives itself round by following gaps - but slower and on a different
-  # line.
+  # The planner, capped at mapping speed. Whatever the algorithm asks for, throttle
+  # +1.0 is only irl_max_throttle_erpm here.
   planning_node = Node(
     package="planner_node",
-    executable="planner_gap_follow",
+    executable="planner",
     output="screen",
     parameters=[{
-      # Crawl. corner and brake both sit at 5000 because that is the one speed
-      # measured good on this car, and a mapping lap has no reason to explore
-      # the 2000-5000 region where the motor may simply not start.
-      "cruise_erpm": ParameterValue(LaunchConfiguration("cruise_erpm"),
-                                    value_type=float),
-      "corner_erpm": 5000.0,
-      "brake_erpm": 5000.0,
-      "brake_current": 4.0,
-
-      # Drive a CENTRED line, not the racing line. deep_band is how far back
-      # from a gap's deepest reading still counts as "the deep end" the car aims
-      # at; 0.20 (the racing default) aims at the deep sliver by the inside apex,
-      # which is fast and correct for a lap time and wrong for mapping.
-      #
-      # Measured offline by raycasting a wide corner and asking how close the
-      # aimed heading passes to a wall: at 0.20 it passes 1.4 m from the apex, at
-      # 0.50 it passes 5.3 m away - while still turning +31.7 deg into the corner
-      # versus +34.3 deg. So this buys a centred car for almost no turn-in.
-      #
-      # That matters for the map, not just for safety. Centred, both walls are
-      # at moderate range and hit the scanner near perpendicular; hugging an apex
-      # puts one wall 0.2 m away at grazing incidence, where it returns few
-      # points and scan matching is badly conditioned.
-      "deep_band": 0.50,
-
-      # Wider than the racing 0.18, so the car eases off earlier into anything
-      # narrowing. Deliberately conservative: a mapping lap that brushes a wall
-      # is a mapping lap you do again.
-      "corridor_half_width": 0.25,
-      # Drop to corner speed at a smaller steering request than the 0.30 racing
-      # default, so the car is already slow BEFORE it starts rotating - yaw is
-      # where the odometry is weakest.
-      "corner_lock_fraction": 0.20,
+      "irl_max_throttle_erpm": ParameterValue(
+        LaunchConfiguration("irl_max_throttle_erpm"), value_type=float),
+      "irl_max_brake_amps": 4.0,
     }],
   )
 
@@ -341,7 +309,7 @@ def generate_launch_description():
   ld.add_action(odom_source_arg)
   ld.add_action(lidar_x_arg)
   ld.add_action(lidar_z_arg)
-  ld.add_action(cruise_erpm_arg)
+  ld.add_action(max_throttle_arg)
   ld.add_action(lidar_node)
   ld.add_action(foxglove_node)
   ld.add_action(planning_node)

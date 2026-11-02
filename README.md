@@ -1,5 +1,51 @@
 # RoboRacer Stack
 
+A blank environment for testing new driving algorithms. You get the lidar scan and return a drive command; the rest of the stack is already wired up.
+
+## Writing an algorithm
+
+Edit one function, `computeDrive()` in [algorithm.cpp](ros_ws/src/planner_node/src/algorithm.cpp). It runs once per scan and starts out holding the car still:
+
+```cpp
+DriveCommand computeDrive(const std::vector<float> &ranges)
+{
+  DriveCommand cmd;
+  cmd.steering = 0.0f;
+  cmd.throttle = 0.0f;
+  return cmd;
+}
+```
+
+**Input:** `ranges[i]` is the distance in meters seen by beam `i`, at angle `ind2angle(i)` radians (0 is straight ahead, positive is left). A beam with no return can read `0`, `inf` or `nan`.
+
+**Output:** both values are normalized, and anything outside `[-1, 1]` is clamped.
+
+| Field | `+1.0` | `0.0` | `-1.0` |
+| --- | --- | --- | --- |
+| `steering` | full lock left | straight | full lock right |
+| `throttle` | max throttle | coast | max brake |
+
+Positive throttle scales up to one max throttle value and negative throttle scales up to one max brake value, so `0.5` is half of max throttle and `-0.5` is half of max brake. Each is set by one parameter in the launch file:
+
+| | Sim (`sim_launch.py`) | Real car (`irl_launch.py`) |
+| --- | --- | --- |
+| `throttle` `+1.0` | `sim_max_throttle` (0.25) | `irl_max_throttle_erpm` (15000 eRPM, ~3.25 m/s) |
+| `throttle` `-1.0` | `sim_max_brake` (0.25) | `irl_max_brake_amps` (4 A) |
+
+The same code runs on both, with these differences:
+
+| | Sim | Real car |
+| --- | --- | --- |
+| Lowest usable `throttle` | none | ~0.33, because the VESC won't start the motor below about 5000 eRPM |
+| `throttle` below `0` | reverse throttle; holding it backs the car up | brake current; the car stops |
+| E-stop | none; the car drives as soon as scans arrive | stopped until the kill switch is armed |
+
+To run your changes in the sim, restart the onboard container. It rebuilds `ros_ws/src` on startup:
+
+```bash
+docker compose restart onboard
+```
+
 ## Setup
 
 ### 1. Install Git LFS and the Simulator
