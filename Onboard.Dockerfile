@@ -61,7 +61,7 @@ COPY ros_ws/. /home/ros_ws
 #
 # That list had drifted and the image stopped building: io_context declares
 # `asio` and `udp_msgs`, neither of which was installed, so it failed and took
-# serial_driver -> vesc_driver down with it, then vesc_msgs / rf2o / planner_node
+# serial_driver -> vesc_driver down with it, then vesc_msgs / rf2o / planner
 # aborted alongside. rosdep maps those to libasio-dev and ros-$ROS_DISTRO-udp-msgs
 # (plus sick_scan_xd, python3-serial, python3-smbus, example-interfaces)
 # straight from the manifests, so adding a package to ros_ws no longer means

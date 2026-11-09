@@ -25,8 +25,7 @@ from launch_ros.actions import Node
 #
 # steering_angle_to_servo_gain
 #                          Servo units per radian of road-wheel angle, and it is
-#                          NEGATIVE on this car: servo 0.117 is full LEFT (that
-#                          is what circle_test commands by default) while
+#                          NEGATIVE on this car: servo 0.117 is full LEFT while
 #                          REP-103 counts left as a POSITIVE angle. Get this
 #                          sign wrong and every turn integrates the wrong way,
 #                          so the map comes out mirrored.
@@ -160,7 +159,7 @@ def generate_launch_description():
       # handicapped at correcting it.
       #
       # handling 5 = RANGE_FILTER_TO_NAN, the ROS convention for "no return".
-      # Both consumers discard NaN. An algorithm in planner_node sees these beams
+      # Both consumers discard NaN. An algorithm in planner sees these beams
       # as NaN too, so it has to handle them itself.
       "range_min:=0.05",
       "range_max:=25.0",
@@ -204,10 +203,6 @@ def generate_launch_description():
   # It is STOPPED unless killswitch_node (below) says otherwise, so the operator's
   # handheld remote has to be armed before anything moves.
   #
-  # The old keyboard console (ros2 run planner_node estop) still exists for bench
-  # work, but it publishes the SAME /estop topic - run one or the other, NEVER
-  # both, or the planner sees the two of them alternating at 100 Hz.
-  #
   # NOTE for mapping: /commands/servo/position is also what vesc_to_odom needs
   # to know the steering angle (the driver echoes it back on
   # sensors/servo_position_command). vesc_to_odom publishes NOTHING until it has
@@ -217,14 +212,14 @@ def generate_launch_description():
   # e-stop is engaged - but it is why "slam_toolbox sees no TF" usually means
   # "the planner or the VESC is down", not a SLAM problem.
   planning_node = Node(
-    package='planner_node',
+    package='planner',
     executable='planner',
     output='screen',
     parameters=[{
       # Electrical RPM = mechanical RPM x motor pole pairs. This is what the
       # algorithm's throttle +1.0 becomes. The VESC speed PID has a minimum ERPM
       # below which it will not START the motor: 2000 measured as a no-op on this
-      # car, 5000 holds cleanly at ~4.4 A. So at 15000, a throttle under ~0.33
+      # car, 5000 holds cleanly at ~4.4 A. So at 30000, a throttle under ~0.17
       # may not move the car at all.
       'irl_max_throttle_erpm': 30000.0,
       # What the algorithm's throttle -1.0 becomes, in amps. Also the planner's
@@ -245,7 +240,7 @@ def generate_launch_description():
   # all brake the car within timeout_ms. That is the fallback the whole design
   # exists for - test it by turning the laptop's WiFi off with the car on blocks.
   killswitch_node = Node(
-    package='planner_node',
+    package='planner',
     executable='killswitch',
     name='killswitch_node',
     output='screen',
@@ -260,7 +255,7 @@ def generate_launch_description():
       # ARM the car is worth four bytes of defence. A mismatch is fail-safe - the
       # car simply refuses to arm.
       'token': 0x5252534B,
-      'brake_current': 4.0,
+      'brake_current': 20.0,
     }],
   )
 

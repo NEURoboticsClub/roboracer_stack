@@ -4,7 +4,7 @@ A blank environment for testing new driving algorithms. You get the lidar scan a
 
 ## Writing an algorithm
 
-Edit one function, `computeDrive()` in [algorithm.cpp](ros_ws/src/planner_node/src/algorithm.cpp). It runs once per scan and starts out holding the car still:
+Edit one function, `computeDrive()` in [algorithm.cpp](ros_ws/src/planner/src/algorithm.cpp). It runs once per scan and starts out holding the car still:
 
 ```cpp
 DriveCommand computeDrive(const std::vector<float> &ranges)

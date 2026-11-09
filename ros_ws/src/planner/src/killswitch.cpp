@@ -8,9 +8,9 @@
 //     laptop:  gamepad -> tools/killswitch_remote.py -> UDP @ 50 Hz
 //     car:     this node -> /estop + /commands/motor/brake @ 100 Hz
 //
-// It speaks EXACTLY the contract estop.cpp already speaks, so the planner needs
-// no changes: /estop is a 100 Hz heartbeat (not edge-triggered) and the brake is
-// slammed straight at the VESC while stopped.
+// It speaks EXACTLY the contract the planner expects: /estop is a 100 Hz
+// heartbeat (not edge-triggered) and the brake is slammed straight at the VESC
+// while stopped.
 //
 // THE CAR IS STOPPED BY DEFAULT and stays stopped unless all three hold:
 //
@@ -29,8 +29,8 @@
 // and reliable+transient_local over a lossy link is precisely the wrong bias. It
 // also means the laptop needs no ROS install at all.
 //
-// DO NOT RUN THIS AND estop.cpp AT THE SAME TIME. Both publish /estop at 100 Hz
-// and the planner would see the two of them alternating.
+// This is the ONLY /estop publisher. Never add a second one: both would publish
+// at 100 Hz and the planner would see the two of them alternating.
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -131,7 +131,7 @@ public:
 
     brake_current_ = declare_parameter<double>("brake_current", 4.0);
 
-    // Latched, matching estop.cpp, so the planner picks up the current state
+    // Latched, matching the planner's subscription, so it picks up the current state
     // whenever it starts rather than only on the next change.
     rclcpp::QoS latched(1);
     latched.transient_local().reliable();

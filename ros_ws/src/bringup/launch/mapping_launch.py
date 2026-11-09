@@ -8,15 +8,16 @@ toward a map that closes cleanly:
     (config/mapper_params_mapping.yaml)
 
 Use irl_launch.py to actually drive the track. The car only moves if the
-algorithm in planner_node's src/algorithm.cpp drives it.
+algorithm in planner's src/algorithm.cpp drives it.
 
     HOW TO RUN
 
     terminal 1:  ros2 launch bringup mapping_launch.py \
                      lidar_x:=0.25 odom_source:=rf2o
-    terminal 2:  ros2 run planner_node estop        # press r to release, SPACE to stop
+    terminal 2:  ros2 run planner killswitch
+    laptop:      python tools/killswitch_remote.py --host <jetson-ip>
 
-  Nothing moves until the e-stop console releases the car - that is deliberate,
+  Nothing moves until the kill-switch remote arms the car - that is deliberate,
   and it is also how you stop the lap when you have been round once.
 
   Watch it build in Foxglove at ws://<jetson-ip>:8765. In the 3D panel set the
@@ -83,9 +84,9 @@ def generate_launch_description():
   # every SLAM parameter in this launch put together.
   #
   # No tape measure? Set it by bisection instead: run a couple of slow laps at
-  # 0.0 and at 0.30 and see which corners are sharper. Or hold one steering
-  # position with `ros2 run planner_node circle_test` so the car traces a steady
-  # circle - a wrong lidar_x smears that circle's walls into a ring, and the
+  # 0.0 and at 0.30 and see which corners are sharper. Or have computeDrive()
+  # return one fixed steering value so the car traces a steady circle - a
+  # wrong lidar_x smears that circle's walls into a ring, and the
   # value that makes the ring collapse to a single line is the right one.
   # ---------------------------------------------------------------------------
   lidar_x_arg = DeclareLaunchArgument(
@@ -194,7 +195,7 @@ def generate_launch_description():
       # handicapped at correcting it.
       #
       # handling 5 = RANGE_FILTER_TO_NAN, the ROS convention for "no return".
-      # Both consumers discard NaN. An algorithm in planner_node sees these beams
+      # Both consumers discard NaN. An algorithm in planner sees these beams
       # as NaN too, so it has to handle them itself.
       "range_min:=0.05",
       "range_max:=25.0",
@@ -221,7 +222,7 @@ def generate_launch_description():
   # The planner, capped at mapping speed. Whatever the algorithm asks for, throttle
   # +1.0 is only irl_max_throttle_erpm here.
   planning_node = Node(
-    package="planner_node",
+    package="planner",
     executable="planner",
     output="screen",
     parameters=[{

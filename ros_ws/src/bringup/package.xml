@@ -15,7 +15,7 @@
        fails at build/rosdep time with a name, instead of at car-side launch
        time with "package not found" while the track is booked. -->
   <exec_depend>sick_scan_xd</exec_depend>
-  <exec_depend>planner_node</exec_depend>
+  <exec_depend>planner</exec_depend>
   <exec_depend>vesc_driver</exec_depend>
   <exec_depend>vesc_ackermann</exec_depend>
   <exec_depend>rf2o_laser_odometry</exec_depend>

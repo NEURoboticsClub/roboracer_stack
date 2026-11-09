@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ---------------------------------------------------------------------------
 # AutoDRIVE simulator bring-up: the planner and Foxglove, plus Cartographer on
-# request. The algorithm itself is planner_node's src/algorithm.cpp.
+# request. The algorithm itself is planner's src/algorithm.cpp.
 #
 # MAPPING. Off by default; turn it on with `mapping:=true`. Cartographer 2D,
 # driven by LIDAR SCAN MATCHING ONLY - no odometry, no IMU, and never the
@@ -76,7 +76,7 @@ def generate_launch_description():
     )
 
     planning_node = Node(
-        package="planner_node",
+        package="planner",
         executable="planner",
         name="planner",
         output="screen",
@@ -89,7 +89,7 @@ def generate_launch_description():
             # /commands/motor/speed, which nothing in the sim subscribes to, and
             # the car just sat there.
             #
-            # output_mode:=sim ALSO means no e-stop: the console is a real-car
+            # output_mode:=sim ALSO means no e-stop: the kill-switch is a real-car
             # thing and there is none in the sim stack, so the planner drives as
             # soon as scans start arriving.
             "output_mode": "sim",

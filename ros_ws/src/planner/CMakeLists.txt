@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(planner_node)
+project(planner)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -27,19 +27,9 @@ target_link_libraries(
   ${vesc_msgs_TARGETS}
 )
 
-# Emergency-stop console. Run in its own terminal; it needs a real stdin, which
-# nodes started by ros2 launch do not get.
-add_executable(estop src/estop.cpp)
-target_compile_features(estop PUBLIC c_std_99 cxx_std_17)
-target_link_libraries(
-  estop
-  ${rclcpp_TARGETS}
-  ${std_msgs_TARGETS}
-)
-
 # Remote kill-switch receiver. Listens for the laptop-held controller's UDP
-# heartbeat and drives /estop exactly like the estop console does. Run ONE of the
-# two, never both - they would fight over /estop at 100 Hz.
+# heartbeat and publishes the /estop heartbeat the planner waits on. It is the
+# only /estop publisher in the stack, so run exactly one.
 add_executable(killswitch src/killswitch.cpp)
 target_compile_features(killswitch PUBLIC c_std_99 cxx_std_17)
 target_link_libraries(
@@ -48,17 +38,7 @@ target_link_libraries(
   ${std_msgs_TARGETS}
 )
 
-# Constant-radius circle test, for measuring the real minimum turning radius.
-# Respects /estop exactly like the planner does.
-add_executable(circle_test src/circle_test.cpp)
-target_compile_features(circle_test PUBLIC c_std_99 cxx_std_17)
-target_link_libraries(
-  circle_test
-  ${rclcpp_TARGETS}
-  ${std_msgs_TARGETS}
-)
-
-install(TARGETS planner estop killswitch circle_test
+install(TARGETS planner killswitch
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

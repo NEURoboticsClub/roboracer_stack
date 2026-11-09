@@ -19,7 +19,7 @@
 //   "vesc" (default)  the real car - /commands/motor/{speed,brake} and
 //                     /commands/servo/position, e-stop enforced.
 //   "sim"             the AutoDRIVE simulator - /autodrive/roboracer_1/
-//                     {throttle,steering}_command, no e-stop console.
+//                     {throttle,steering}_command, no e-stop.
 //
 // The same DriveCommand drives both, so an algorithm tested in the sim runs on
 // the car unchanged.
@@ -127,14 +127,14 @@ public:
       servo_pub = this->create_publisher<std_msgs::msg::Float64>("/commands/servo/position", 1);
     }
 
-    // How long the estop heartbeat may go missing before we brake. The console
-    // sends it at 100 Hz, so this is ~30 missed beats.
+    // How long the /estop heartbeat may go missing before we brake. The
+    // kill-switch sends it at 100 Hz, so this is ~30 missed beats.
     estop_timeout_sec_ = declare_parameter<double>("estop_timeout_sec", 0.3);
 
-    // No e-stop console is part of the sim stack. See holdStopped().
+    // No kill-switch is part of the sim stack. See holdStopped().
     if (!sim_mode_)
     {
-      // Latched to match the estop console's publisher, so starting the planner
+      // Latched to match the kill-switch's publisher, so starting the planner
       // second still picks up an already-engaged stop instead of driving off.
       rclcpp::QoS estop_qos(1);
       estop_qos.transient_local().reliable();
@@ -162,7 +162,7 @@ public:
       RCLCPP_INFO(
         get_logger(),
         "VESC output: throttle +1.0 = %.0f eRPM, -1.0 = %.1f A brake. "
-        "STOPPED BY DEFAULT - run 'ros2 run planner_node estop' and press r to drive.",
+        "STOPPED BY DEFAULT - start killswitch_node and arm the remote to drive.",
         irl_max_throttle_erpm_, irl_max_brake_amps_);
   }
 
@@ -190,10 +190,10 @@ private:
     return std::clamp(servo, servo_min_, servo_max_);
   }
 
-  // The car is stopped unless the estop console is alive AND has released it.
+  // The car is stopped unless the kill-switch is alive AND has released it.
   // Both halves matter: estop_engaged_ starts true so nothing moves before the
-  // console appears, and the heartbeat check means a closed or killed console
-  // stops the car instead of leaving it running on a stale value.
+  // kill-switch appears, and the heartbeat check means a dead or killed
+  // kill-switch stops the car instead of leaving it running on a stale value.
   bool stopRequested()
   {
     if (estop_engaged_)
@@ -207,8 +207,8 @@ private:
       RCLCPP_WARN_THROTTLE(
         get_logger(), steady_clock_, 2000,
         estop_seen_
-          ? "E-STOP heartbeat lost (%.2fs) - braking. Restart: ros2 run planner_node estop"
-          : "Waiting for e-stop console - braking. Run 'ros2 run planner_node estop', press r.",
+          ? "E-STOP heartbeat lost (%.2fs) - braking. Is killswitch_node still running?"
+          : "Waiting for killswitch_node - braking. Start it and arm the remote.",
         age_sec);
       return true;
     }
@@ -218,13 +218,13 @@ private:
 
   // Hold the car stopped if the e-stop says so, publishing the stop itself.
   // Returns true when the caller should emit nothing further this frame.
-  // Only the real car has an e-stop console, so output_mode:=sim never holds.
+  // Only the real car has a kill-switch, so output_mode:=sim never holds.
   bool holdStopped()
   {
     if (sim_mode_)
       return false;
 
-    // The e-stop console also brakes the VESC directly at 100 Hz, so this is the
+    // The kill-switch also brakes the VESC directly at 100 Hz, so this is the
     // cooperative half of the stop: hold the brake and straighten the wheels
     // instead of steering blind.
     if (!stopRequested())
@@ -320,8 +320,8 @@ private:
   double sim_max_throttle_ = 0.1;
   double sim_max_brake_ = 0.1;
   double sim_steer_sign_ = 1.0;
-  // Stopped by default: nothing moves until the estop console releases it.
-  // Only consulted in output_mode:=vesc - the sim has no e-stop console.
+  // Stopped by default: nothing moves until the kill-switch releases it.
+  // Only consulted in output_mode:=vesc - the sim has no kill-switch.
   bool estop_engaged_ = true;
   bool estop_seen_ = false;
   double estop_timeout_sec_ = 0.3;
