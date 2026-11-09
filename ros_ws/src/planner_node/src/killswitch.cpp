@@ -289,7 +289,7 @@ private:
 
   uint32_t token_ = 0;
   std::chrono::milliseconds timeout_{400};
-  double brake_current_ = 4.0;
+  double brake_current_ = 30.0;
 
   // Stopped by default: nothing moves until a valid ARMED packet arrives.
   bool armed_ = false;

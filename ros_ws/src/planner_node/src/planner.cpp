@@ -5,6 +5,7 @@
 #include <string>
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "vesc_msgs/msg/vesc_imu_stamped.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/float64.hpp"
@@ -90,7 +91,7 @@ public:
 
       // Runs even while stopped, so an algorithm that keeps state between scans
       // does not lose track of the world during an e-stop.
-      const DriveCommand cmd = computeDrive(scan->ranges);
+      const DriveCommand cmd = computeDrive(scan->ranges, latest_imu_.get());
 
       // Held stopped (real car only) => the stop has already been published.
       if (holdStopped())
@@ -109,6 +110,8 @@ public:
     // at depth 10 is reliable/volatile, which the bridge's reliable depth-1
     // publisher matches.
     subscription = this->create_subscription<sensor_msgs::msg::LaserScan>("/scan", 10, topic_callback);
+    imu_sub = this->create_subscription<vesc_msgs::msg::VescImuStamped>("/sensors/imu", rclcpp::SensorDataQoS(), [this](vesc_msgs::msg::VescImuStamped::SharedPtr msg) { latest_imu_ = msg; });
+
 
     // Only the stack actually being driven gets publishers, so `ros2 topic
     // list` shows what this run commands.
@@ -326,6 +329,8 @@ private:
   rclcpp::Clock steady_clock_{RCL_STEADY_TIME};
 
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscription;
+  rclcpp::Subscription<vesc_msgs::msg::VescImuStamped>::SharedPtr imu_sub;
+  vesc_msgs::msg::VescImuStamped::SharedPtr latest_imu_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr estop_sub;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr steering_pub;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr throttle_pub;

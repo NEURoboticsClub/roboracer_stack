@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include "vesc_msgs/msg/vesc_imu_stamped.hpp"
 
 // What your algorithm hands back each scan. Both values are normalized, so the
 // same command means the same thing in the sim and on the real car.
@@ -22,7 +23,7 @@ struct DriveCommand
 
 // Called once per lidar scan; whatever it returns goes straight to the car.
 // Implemented in algorithm.cpp.
-DriveCommand computeDrive(const std::vector<float> &ranges);
+DriveCommand computeDrive(const std::vector<float> &ranges, const vesc_msgs::msg::VescImuStamped *imu);
 
 // Angle (radians) of beam `index`: 0 = straight ahead, positive = LEFT.
 float ind2angle(int index);

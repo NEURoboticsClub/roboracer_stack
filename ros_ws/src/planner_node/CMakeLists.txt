@@ -11,6 +11,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(vesc_msgs REQUIRED)
 
 # Lidar in, drive command out. algorithm.cpp is the part to edit.
 add_executable(planner src/planner.cpp src/algorithm.cpp)
@@ -23,6 +24,7 @@ target_link_libraries(
   ${rclcpp_TARGETS}
   ${sensor_msgs_TARGETS}
   ${ackermann_msgs_TARGETS}
+  ${vesc_msgs_TARGETS}
 )
 
 # Emergency-stop console. Run in its own terminal; it needs a real stdin, which

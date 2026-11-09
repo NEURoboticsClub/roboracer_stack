@@ -81,7 +81,7 @@ def generate_launch_description():
         name="planner",
         output="screen",
         # The one rename that makes the algorithm work here unchanged.
-        remappings=[("/scan", SIM_SCAN_TOPIC)],
+        remappings=[("/scan", SIM_SCAN_TOPIC), ("/sensors/imu", "/autodrive/roboracer_1/imu")],
         parameters=[{
             # Drive the AutoDRIVE command topics instead of the VESC ones. This
             # was a compile-time #define, so a sim run needed a source edit and

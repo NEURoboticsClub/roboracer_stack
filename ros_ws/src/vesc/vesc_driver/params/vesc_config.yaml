@@ -14,5 +14,5 @@
     # True mechanical center is 0.500.
     servo_max: 0.895
     servo_min: 0.117
-    speed_max: 23250.0
-    speed_min: -23250.0
+    speed_max: 30000.0
+    speed_min: -30000.0

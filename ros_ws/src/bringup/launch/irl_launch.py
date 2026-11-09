@@ -226,10 +226,10 @@ def generate_launch_description():
       # below which it will not START the motor: 2000 measured as a no-op on this
       # car, 5000 holds cleanly at ~4.4 A. So at 15000, a throttle under ~0.33
       # may not move the car at all.
-      'irl_max_throttle_erpm': 15000.0,
+      'irl_max_throttle_erpm': 30000.0,
       # What the algorithm's throttle -1.0 becomes, in amps. Also the planner's
       # hard stop (e-stop / Ctrl+C).
-      'irl_max_brake_amps': 4.0,
+      'irl_max_brake_amps': 30.0,
     }],
   )
 
