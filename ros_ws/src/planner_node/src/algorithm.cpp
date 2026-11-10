@@ -59,6 +59,9 @@ constexpr float max_range = 10.0f;       // sim lidar range
 static std::vector<float> proc;
 
 // ---- debug helpers ----
+constexpr bool debug_log = true;      // false = no debug spam at all
+constexpr int debug_period_ms = 1000; // one block of debug lines per second
+
 // Logger and clock are statics so they're built once, not every scan.
 static const rclcpp::Logger &dbgLog()
 {
@@ -90,8 +93,10 @@ constexpr float rad2deg = 180.0f / static_cast<float>(M_PI);
 static const char *const MODE_NONE = "NONE";
 static const char *const MODE_DRIVE = "DRIVE";
 static const char *const MODE_STOP_AHEAD = "STOP (ahead < stop_distance)";
-static const char *const MODE_STOP_ALLROUND = "STOP (all-round < 0.3 m)";
+static const char *const MODE_STOP_CLOSE = "STOP (front < 0.3 m)";
 static const char *const MODE_NO_SCAN = "STOP (bad/empty scan)";
+static const char *const MODE_STRAIGHT = "STRAIGHT TEST";
+static const char *const MODE_STRAIGHT_STOP = "STRAIGHT TEST: STOP (ahead <= stop_distance)";
 static const char *mode = MODE_NONE;
 
 // Raw reading of the beam nearest `angle` (rad). -1 if the scan doesn't reach it.
@@ -181,6 +186,22 @@ static void debugScan(const std::vector<float> &ranges)
   // looks like an empty road
   if (ahead_beams > 0 && ahead_noret == ahead_beams)
     DBG_WARN("ahead: EVERY front beam is a no-return - brake sees inf and thinks it's clear");
+
+  // the front cone the brake looks at, raw, one sample per 2.5 deg
+  // (0/inf/nan print as-is - those are the ones the brake skips)
+  static char front[512];
+  int flen = 0;
+  const int steps = static_cast<int>(ahead_half_angle * rad2deg / 2.5f);
+  for (int k = -steps; k <= steps; k++)
+  {
+    const float deg = k * 2.5f;
+    const int w = std::snprintf(front + flen, sizeof(front) - flen, " %+.1f:%.2f", deg,
+                                rawAt(ranges, deg / rad2deg));
+    if (w < 0 || w >= static_cast<int>(sizeof(front)) - flen)
+      break;
+    flen += w;
+  }
+  DBG("front raw deg:m%s", front);
 
   // sample beams, raw (nan/inf print as-is, -1 = outside the scan)
   static char buf[256];
@@ -352,25 +373,77 @@ DriveCommand followGap(const std::vector<float> &ranges)
   return cmd;
 }
 
-// Emergency brake if ANY beam (all the way round, not just in front) sees
-// something closer than all_round_stop_distance. Otherwise follow the gap.
-constexpr float all_round_stop_distance = 0.3f; // m, measured from the lidar
+// Emergency brake if any beam right in front (+-ahead_half_angle) sees
+// something closer than close_stop_distance. Side and rear beams are ignored,
+// so a wall alongside doesn't stop the car. Otherwise follow the gap.
+constexpr float close_stop_distance = 0.3f; // m, measured from the lidar
 DriveCommand driveForward(const std::vector<float> &ranges)
 {
   for (int i = 0; i < static_cast<int>(ranges.size()); i++)
   {
+    if (std::abs(ind2angle(i)) > ahead_half_angle)
+      continue; // not in front
     const float r = ranges[i];
     // Skip no-returns (0, inf, nan): the real SICK reads 0 for "nothing there",
     // so counting 0 as close would brake forever.
-    if (std::isfinite(r) && r > 0.0f && r < all_round_stop_distance)
+    if (std::isfinite(r) && r > 0.0f && r < close_stop_distance)
     {
-      mode = MODE_STOP_ALLROUND;
-      DBG_WARN("all-round brake: beam %d @ %+.1f deg reads %.3f m < %.2f m -> throttle 0, steer 0",
-               i, ind2angle(i) * rad2deg, r, all_round_stop_distance);
+      mode = MODE_STOP_CLOSE;
+      DBG_WARN("close brake: beam %d @ %+.1f deg reads %.3f m < %.2f m -> throttle 0, steer 0",
+               i, ind2angle(i) * rad2deg, r, close_stop_distance);
       return moveForward(0.0f); // emergency brake
     }
   }
-  return followGap(ranges); // checked every beam, nothing too close
+  return followGap(ranges); // nothing too close in front
+}
+
+// ---- straight-line test ----
+// true = ignore the gap, drive dead straight at test_throttle and stop at
+// stop_distance. For checking the brake and what the lidar sees up close.
+constexpr bool straight_test = true;
+// 0.2 is 0.05 in the sim (same as min_throttle). Too low to move the real car.
+constexpr float test_throttle = 0.2f;
+
+DriveCommand goStraight(const std::vector<float> &ranges)
+{
+  const float ahead = closestAhead(ranges);
+  if (ahead <= stop_distance)
+  {
+    mode = MODE_STRAIGHT_STOP;
+    return moveForward(brake_throttle);
+  }
+  mode = MODE_STRAIGHT;
+  DBG("straight: ahead %.3f m%s -> throttle %+.2f",
+      ahead, std::isinf(ahead) ? " (no return!)" : "", test_throttle);
+  return moveForward(test_throttle);
+}
+
+// While stopped: how long, and how much closer the nearest thing in front got
+// since the stop began. If "crept" keeps growing, the car is still pushing.
+static void debugStopped(const std::vector<float> &ranges, const DriveCommand &cmd)
+{
+  if (!debug_log)
+    return;
+  static bool was_stopped = false;
+  static auto since = std::chrono::steady_clock::now();
+  static float ahead_at_stop = INFINITY;
+
+  const bool stopped = cmd.throttle <= 0.0f;
+  const float ahead = closestAhead(ranges);
+  const auto now = std::chrono::steady_clock::now();
+  if (stopped && !was_stopped)
+  {
+    since = now;
+    ahead_at_stop = ahead;
+  }
+  was_stopped = stopped;
+  if (!stopped)
+    return;
+
+  DBG_WARN("STOPPED %.1f s [%s]: ahead %.3f m%s, was %.3f m at stop -> crept %+.3f m | throttle %+.2f steer %+.2f",
+           std::chrono::duration<float>(now - since).count(), mode,
+           ahead, std::isfinite(ahead) ? "" : " (NO RETURN in front)",
+           ahead_at_stop, ahead_at_stop - ahead, cmd.throttle, cmd.steering);
 }
 
 // Called once per scan. Pick which algorithm drives the car.
@@ -382,14 +455,15 @@ DriveCommand computeDrive(const std::vector<float> &ranges)
   //no emergency brake, just follow the gap
   //return followGap(ranges);
 
-
-  //uses emergency brake if anything is too close, otherwise follow the gap
-  const DriveCommand cmd = driveForward(ranges);
+  // TESTING: straight_test = true drives straight at the wall (brake still
+  // on). false = emergency brake + follow the gap.
+  const DriveCommand cmd = straight_test ? goStraight(ranges) : driveForward(ranges);
 
   // not throttled: you always see the moment it starts or stops braking
   if (debug_log && mode != prev_mode)
     RCLCPP_WARN(dbgLog(), "mode: %s -> %s (throttle %+.2f, steer %+.2f)",
                 prev_mode, mode, cmd.throttle, cmd.steering);
   DBG("cmd: throttle %+.3f steer %+.3f [%s]", cmd.throttle, cmd.steering, mode);
+  debugStopped(ranges, cmd);
   return cmd;
 }
