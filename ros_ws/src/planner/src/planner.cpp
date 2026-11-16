@@ -1,4 +1,5 @@
 #include "algorithm.hpp"
+#include "markers.hpp"
 #include <cmath>
 #include <algorithm>
 #include <chrono>
@@ -29,6 +30,8 @@ namespace
 {
 float angleIncrement = 0.0f; // radians between consecutive beams
 float angleMin = -2.35619f;  // angle of beam 0; updated from the scan each callback
+double scanStampSec = 0.0;   // header stamp of the current scan
+bool simOutput = false;      // output_mode == "sim"
 }
 
 class PlannerNode : public rclcpp::Node
@@ -48,6 +51,7 @@ public:
       output_mode_ = "vesc";
     }
     sim_mode_ = (output_mode_ == "sim");
+    simOutput = sim_mode_;
 
     // What the algorithm's throttle maps to. Each target has exactly two values:
     // +1.0 is its max throttle, -1.0 its max brake, and everything between scales
@@ -88,10 +92,15 @@ public:
     {
       angleIncrement = scan->angle_increment;
       angleMin = scan->angle_min;
+      scanStampSec = rclcpp::Time(scan->header.stamp).seconds();
 
       // Runs even while stopped, so an algorithm that keeps state between scans
       // does not lose track of the world during an e-stop.
       const DriveCommand cmd = computeDrive(scan->ranges, latest_imu_.get());
+
+      // Skip building markers when nothing (RViz, Foxglove) is listening.
+      if (marker_pub->get_subscription_count() > 0)
+        marker_pub->publish(buildMarkers(debugInfo(), scan->header.frame_id, now()));
 
       // Held stopped (real car only) => the stop has already been published.
       if (holdStopped())
@@ -111,6 +120,7 @@ public:
     // publisher matches.
     subscription = this->create_subscription<sensor_msgs::msg::LaserScan>("/scan", 10, topic_callback);
     imu_sub = this->create_subscription<vesc_msgs::msg::VescImuStamped>("/sensors/imu", rclcpp::SensorDataQoS(), [this](vesc_msgs::msg::VescImuStamped::SharedPtr msg) { latest_imu_ = msg; });
+    marker_pub = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_markers", 1);
 
 
     // Only the stack actually being driven gets publishers, so `ros2 topic
@@ -337,6 +347,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr speed_pub;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr brake_pub;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr servo_pub;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub;
 };
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
@@ -356,4 +367,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 float ind2angle(int index)
 {
   return (index * angleIncrement) + angleMin;
+}
+
+double scanTime()
+{
+  return scanStampSec;
+}
+
+bool simMode()
+{
+  return simOutput;
 }

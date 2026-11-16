@@ -21,9 +21,34 @@ struct DriveCommand
   float throttle = 0.0f;
 };
 
+// No-return or anything beyond this is treated as open space at this range.
+constexpr float kMaxRange = 10.0f;
+
 // Called once per lidar scan; whatever it returns goes straight to the car.
 // Implemented in algorithm.cpp.
 DriveCommand computeDrive(const std::vector<float> &ranges, const vesc_msgs::msg::VescImuStamped *imu);
 
+// The last scan's internals, for visualization only.
+struct DebugInfo
+{
+  struct Edge
+  {
+    int index; // jump between beams index and index + 1
+    float a, b;
+  };
+
+  std::vector<float> ranges; // cleaned scan with disparity bubbles applied
+  std::vector<char> blocked; // beam lies inside a bubble
+  std::vector<Edge> edges;   // disparities that created bubbles
+  float heading = 0.0f;      // rad, chosen heading
+};
+const DebugInfo &debugInfo();
+
 // Angle (radians) of beam `index`: 0 = straight ahead, positive = LEFT.
 float ind2angle(int index);
+
+// Header stamp of the current scan in seconds, or 0 if the publisher left it unset.
+double scanTime();
+
+// True when the node runs with output_mode:=sim.
+bool simMode();

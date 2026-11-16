@@ -12,9 +12,10 @@ find_package(sensor_msgs REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(vesc_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 # Lidar in, drive command out. algorithm.cpp is the part to edit.
-add_executable(planner src/planner.cpp src/algorithm.cpp)
+add_executable(planner src/planner.cpp src/algorithm.cpp src/markers.cpp)
 target_include_directories(planner PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
@@ -25,6 +26,7 @@ target_link_libraries(
   ${sensor_msgs_TARGETS}
   ${ackermann_msgs_TARGETS}
   ${vesc_msgs_TARGETS}
+  ${visualization_msgs_TARGETS}
 )
 
 # Remote kill-switch receiver. Listens for the laptop-held controller's UDP

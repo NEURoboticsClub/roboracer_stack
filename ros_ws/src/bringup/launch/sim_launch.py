@@ -97,7 +97,7 @@ def generate_launch_description():
             # AutoDRIVE's throttle is normalized [-1, 1] and open-loop. This is
             # what the algorithm's throttle +1.0 becomes: 0.10 runs ~2.2 m/s and
             # throttle-to-speed is not linear at the low end.
-            "sim_max_throttle": 0.25,
+            "sim_max_throttle": 0.5,
             # What the algorithm's throttle -1.0 becomes. AutoDRIVE has no brake,
             # so this is sent as reverse throttle, and holding it backs the car up.
             "sim_max_brake": 0.25,
