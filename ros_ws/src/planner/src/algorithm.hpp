@@ -52,3 +52,11 @@ double scanTime();
 
 // True when the node runs with output_mode:=sim.
 bool simMode();
+
+// Forward wheel speed in m/s from the VESC (/sensors/core). -1 = unknown (sim,
+// or it's gone quiet). Wheelspin reads high, locked wheels read 0.
+float wheelSpeed();
+
+// Normalized throttle that asks the real car for `mps` m/s, using
+// irl_max_throttle_erpm and speed_to_erpm_gain from the launch file.
+float speedToThrottle(float mps);

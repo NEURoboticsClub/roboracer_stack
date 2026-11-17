@@ -3,21 +3,27 @@
 #include <chrono>
 #include <cmath>
 #include <vector>
+#include "rclcpp/rclcpp.hpp"
 
 
 namespace
 {
-constexpr float kDisparity = 0.2f;        // m jump between neighbouring beams = an edge
+constexpr float kDisparity = 0.4f;        // m jump between neighbouring beams = an edge. Lower = bumpy walls sprout bubbles
 constexpr float kMaxBubbleAngle = 0.35f;  // rad cap so a close edge can't blank out the world
 constexpr float kForwardLimit = 1.5708f;  // only consider gaps within +-90 deg
 constexpr float kDepthTie = 0.10f;        // gap depths this close are a tie, broken by width
 constexpr float kClosingSpeedGain = 0.4f; // low-pass filter gain on closing speed
+constexpr float kMaxClosingSpeed = 10.0f; // m/s; faster than this is a new obstacle popping in, not motion
+constexpr float kBrakeDeadband = 0.3f;    // m/s over the cap the VESC's own speed loop gets to fix before we brake
+constexpr float kBrakeStep = 0.2f;        // max brake added per scan (15 Hz): full in ~1/3 s, no jolt
+constexpr float kBrakeRelease = 0.5f;     // let go once the decel we need drops under this x brake_decel
+constexpr float kSlideMargin = 1.0f;      // m/s the lidar has to beat the wheels by to call it a skid
 constexpr float kDegToRad = 3.14159265f / 180.0f;
 
 
 // ---- emergency brake ----
-constexpr float close_stop_distance = 0.5f; // m from the lidar: closer than this = stop
-constexpr float ahead_half_angle = 0.35f;   // rad (~20 deg) each side of straight ahead
+constexpr float close_stop_distance = 0.3f; // m from the lidar: closer than this = stop
+constexpr float ahead_half_angle = 0.3f;   // rad (~20 deg) each side of straight ahead
 // 0 = cut throttle and roll to a stop. In the sim negative is REVERSE, so keep 0.
 constexpr float stop_throttle = 0.0f;
 
@@ -48,23 +54,32 @@ struct Tuning
  float brake_activation_distance; // m
  float brake_engage_speed;        // m/s toward the obstacle
  float brake_release_speed;       // m/s toward the obstacle
+ // Speed governor (real car): cap speed at what can still slow to creep_speed
+ // by brake_margin, and only brake if we're over that cap anyway.
+ float brake_decel;      // m/s^2 the cap slows us at. Lower = eases off earlier and gentler. 0 = off
+ float brake_latency;    // s from the scan to the VESC actually reacting
+ float brake_margin;     // m from the lidar where we're down to creep_speed
+ float creep_speed;      // m/s we can always crawl at to steer out. VESC won't hold much under ~1.1
+ float brake_full_decel; // m/s^2 the car does at full brake. Lower = brakes harder for the same need
 
 
  // Normalized throttle (see DriveCommand)
  float cruise_throttle;
  float corner_throttle;
- float brake_throttle; // braking state: a lower speed, not reverse
+ float brake_throttle; // braking state. Real car: negative = brake current. Sim: negative is reverse
 };
 
 
 // Real car. Throttle 1.0 = irl_max_throttle_erpm (30000) in irl_launch.py.
-constexpr float kIrlMaxErpm = 30000.0f;
+constexpr float kIrlMaxErpm = 50000.0f;
 constexpr Tuning kIrl{
- 0.22f, 0.8f, 0.40f, 0.20f,             // bubble, gap depth, gap width, deep band
+ 0.15f, 0.8f, 0.40f, 0.20f,             // bubble, gap depth, gap width, deep band
  0.80f, 0.30f, 0.0f,                    // max steer, corner lock, side clearance
  20.0f * kDegToRad, 0.18f, 2.0f, 2.0f,  // cone, corridor, corner dist, slowdown dist
- 3.0f, 0.8f, 0.2f,                      // brake activation, engage, release
- 15000.0f / kIrlMaxErpm, 7000.0f / kIrlMaxErpm, 5000.0f / kIrlMaxErpm, // cruise, corner, brake
+ 3.0f, 5.0f, 0.2f,                      // brake activation, engage, release
+ 3.0f, 0.15f, 0.5f, 1.1f, 5.0f,         // governor: decel, latency, margin, creep, full-brake decel
+ 50000.0f / kIrlMaxErpm, 10000.0f / kIrlMaxErpm, // cruise, corner
+ -0.2f,                                 // brake: full irl_max_brake_amps
 };
 
 
@@ -77,6 +92,7 @@ constexpr Tuning kSim{
  0.80f, 0.30f, 0.25f,                   // max steer, corner lock, side clearance
  20.0f * kDegToRad, 0.18f, 2.0f, 6.0f,  // cone, corridor, corner dist, slowdown dist
  2.0f, 2.0f, 1.5f,                      // brake activation, engage, release
+ 0.0f, 0.15f, 0.5f, 0.0f, 5.0f,         // governor: off in the sim
  0.06f / kSimMaxThrottle, 0.048f / kSimMaxThrottle, 0.05f / kSimMaxThrottle, // cruise, corner, brake
 };
 
@@ -305,17 +321,24 @@ struct ClosingBrake
  bool have_prev = false;
  float prev_clearance = 0.0f;
  double prev_time = 0.0;
- float speed = 0.0f; // filtered m/s toward the obstacle
+ float speed = 0.0f; // filtered m/s toward the obstacle, from the lidar
+ float v = 0.0f;     // speed the brakes go off: wheels if we have them, else lidar
  bool active = false;
 
 
- bool update(float clearance, double now)
+ bool update(float clearance, double now, float wheel_speed)
  {
    const double dt = now - prev_time;
    if (!have_prev || dt > 0.001) // skip duplicate stamps, keep the old baseline
    {
      if (have_prev && dt < 1.0)
-       speed += kClosingSpeedGain * ((prev_clearance - clearance) / static_cast<float>(dt) - speed);
+     {
+       // A jump this big is the nearest point in the corridor changing (new
+       // obstacle, or one left), not the car moving. Just rebaseline.
+       const float raw = (prev_clearance - clearance) / static_cast<float>(dt);
+       if (std::abs(raw) <= kMaxClosingSpeed)
+         speed += kClosingSpeedGain * (raw - speed);
+     }
      else if (have_prev)
      {
        speed = 0.0f; // stale baseline
@@ -327,13 +350,66 @@ struct ClosingBrake
    }
 
 
-   if (clearance <= tune->brake_activation_distance && speed >= tune->brake_engage_speed)
+   // Wheels are instant, the filtered lidar speed lags (reads high while slowing,
+   // which used to fake an overspeed and kick the brake on). So wheels first;
+   // the lidar only wins if it's way faster, i.e. the wheels locked and we're sliding.
+   v = wheel_speed < 0.0f ? speed : (speed > wheel_speed + kSlideMargin ? speed : wheel_speed);
+
+
+   if (clearance <= tune->brake_activation_distance && v >= tune->brake_engage_speed)
      active = true;
-   else if (speed <= tune->brake_release_speed || clearance > tune->brake_activation_distance)
+   else if (v <= tune->brake_release_speed || clearance > tune->brake_activation_distance)
      active = false;
    return active;
  }
 } closing_brake;
+
+
+// Real car speed governor.
+//  - Cap speed at v_safe, the most we can still bleed down to creep_speed by
+//    brake_margin at a gentle brake_decel. The cap drops smoothly as a wall gets
+//    closer, so the VESC's speed loop just eases off. That's the gentle part.
+//  - If the car's over the cap anyway, brake with whatever decel it now takes
+//    to make the margin, as a fraction of full brake. Ramped in so it doesn't
+//    jolt, unless it needs everything right now. Once on it rides out the
+//    whole slowdown instead of pulsing on and off.
+struct Governor
+{
+ bool on = false;     // braking (vs just capping speed)
+ float brake = 0.0f;  // 0..1, last scan's brake
+ float v_safe = 0.0f; // for the log
+
+
+ float apply(float throttle, float clearance, float v)
+ {
+   const Tuning &t = *tune;
+   const float c = t.creep_speed;
+   const float room = clearance - t.brake_margin - v * t.brake_latency;
+   v_safe = std::sqrt(c * c + 2.0f * t.brake_decel * std::max(0.0f, room));
+
+
+   // decel that still gets us down to creep speed by the margin
+   const float need = v <= c ? 0.0f
+     : room > 0.05f ? (v * v - c * c) / (2.0f * room)
+     : INFINITY;
+
+
+   if (!on)
+     on = v > v_safe + kBrakeDeadband;
+   else if (need < kBrakeRelease * t.brake_decel)
+     on = false; // steered clear, or slowed right down
+
+
+   if (!on)
+   {
+     brake = 0.0f;
+     return std::min(throttle, speedToThrottle(v_safe));
+   }
+   const float target = std::min(1.0f, need / t.brake_full_decel);
+   brake = target >= 1.0f ? 1.0f : std::min(target, brake + kBrakeStep);
+   return std::min(throttle, -brake * std::abs(t.brake_throttle));
+ }
+} governor;
 
 
 // Time from the scan stamp so bursty delivery (the sim bridge) doesn't fake closing speed.
@@ -390,31 +466,54 @@ DriveCommand computeDrive(const std::vector<float> &ranges, const vesc_msgs::msg
  const float clearance = frontClearance(has_reading);
  bool braking = false;
  if (has_reading)
-   braking = closing_brake.update(clearance, scanTimeOrNow());
+   braking = closing_brake.update(clearance, scanTimeOrNow(), wheelSpeed());
  else
+ {
    closing_brake = ClosingBrake{};
+   governor = Governor{};
+ }
 
 
  cmd.steering = std::clamp(heading / tune->max_steer_angle, -1.0f, 1.0f);
+ cmd.throttle = throttleFor(has_reading, braking, clearance, heading);
+ if (has_reading && tune->brake_decel > 0.0f)
+   cmd.throttle = governor.apply(cmd.throttle, clearance, closing_brake.v);
 
 
  // Emergency brake: any real return within +-ahead_half_angle closer than
  // close_stop_distance cuts the throttle. Uses the raw scan, not the cleaned one.
- for (int i = 0; i < static_cast<int>(ranges.size()); i++)
+ bool estop = false;
+ for (int i = 0; i < static_cast<int>(ranges.size()) && !estop; i++)
  {
    if (std::abs(ind2angle(i)) > ahead_half_angle)
      continue;
    const float r = ranges[i];
-  
-   if (std::isfinite(r) && r > 0.0f && r < close_stop_distance)
-   {
-     cmd.throttle = 0.0f; // steering still follows the gap
-     return cmd;
-   }
+   estop = std::isfinite(r) && r > 0.0f && r < close_stop_distance;
  }
+ if (estop)
+   cmd.throttle = -1.0f; // steering still follows the gap
 
 
- cmd.throttle = throttleFor(has_reading, braking, clearance, heading);
+ // One line when a brake starts and one when it ends, with how hard it got.
+ static bool was_braking = false;
+ static float peak = 0.0f;
+ static double started = 0.0;
+ static const rclcpp::Logger log = rclcpp::get_logger("planner.algo");
+ const bool now_braking = cmd.throttle < 0.0f;
+ if (now_braking && !was_braking)
+ {
+   started = scanTimeOrNow();
+   peak = 0.0f;
+   RCLCPP_WARN(log, "BRAKE %.0f%%%s: %.2f m/s (lidar %.2f, wheels %.2f), safe %.2f m/s, clearance %.2f m",
+               -cmd.throttle * 100.0f, estop ? " (e-stop)" : "", closing_brake.v, closing_brake.speed,
+               wheelSpeed(), governor.v_safe, clearance);
+ }
+ if (now_braking)
+   peak = std::max(peak, -cmd.throttle);
+ else if (was_braking)
+   RCLCPP_INFO(log, "brake off after %.2f s, peak %.0f%%: %.2f m/s, clearance %.2f m",
+               scanTimeOrNow() - started, peak * 100.0f, closing_brake.v, clearance);
+ was_braking = now_braking;
  return cmd;
 }
 

@@ -76,9 +76,9 @@ def generate_launch_description():
   # TO MAP AGAIN, use the launch file that is for it, rather than reviving these:
   #     ros2 launch bringup mapping_launch.py
   #
-  # Note the SPEED_TO_ERPM_GAIN / STEERING_* / WHEELBASE constants at the top are
-  # now unused here - they only ever fed vesc_to_odom. Left in place so
-  # uncommenting is a clean revert.
+  # Note the STEERING_* / WHEELBASE constants at the top are now unused here -
+  # they only ever fed vesc_to_odom. Left in place so uncommenting is a clean
+  # revert. SPEED_TO_ERPM_GAIN is still used: the planner's brake reads it.
   # -------------------------------------------------------------------------
 
 
@@ -221,10 +221,13 @@ def generate_launch_description():
       # below which it will not START the motor: 2000 measured as a no-op on this
       # car, 5000 holds cleanly at ~4.4 A. So at 30000, a throttle under ~0.17
       # may not move the car at all.
-      'irl_max_throttle_erpm': 30000.0,
+      'irl_max_throttle_erpm': 50000.0,
       # What the algorithm's throttle -1.0 becomes, in amps. Also the planner's
       # hard stop (e-stop / Ctrl+C).
-      'irl_max_brake_amps': 30.0,
+      'irl_max_brake_amps': 120.0,
+      # Turns the VESC's eRPM into m/s for the stopping-distance brake. Same
+      # (unmeasured) gain as vesc_to_odom - see CALIBRATING SCALE at the bottom.
+      'speed_to_erpm_gain': SPEED_TO_ERPM_GAIN,
     }],
   )
 

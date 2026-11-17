@@ -7,6 +7,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "vesc_msgs/msg/vesc_imu_stamped.hpp"
+#include "vesc_msgs/msg/vesc_state_stamped.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/float64.hpp"
@@ -32,6 +33,10 @@ float angleIncrement = 0.0f; // radians between consecutive beams
 float angleMin = -2.35619f;  // angle of beam 0; updated from the scan each callback
 double scanStampSec = 0.0;   // header stamp of the current scan
 bool simOutput = false;      // output_mode == "sim"
+double wheelSpeedMps = 0.0;  // from /sensors/core, real car only
+std::chrono::steady_clock::time_point wheelSpeedTime{};
+double erpmPerMps = 4614.0;      // speed_to_erpm_gain
+double maxThrottleErpm = 6000.0; // irl_max_throttle_erpm
 }
 
 class PlannerNode : public rclcpp::Node
@@ -69,6 +74,15 @@ public:
     // Real car, throttle -1.0: braking current in amps. Also the planner's hard
     // stop (e-stop and Ctrl+C).
     irl_max_brake_amps_ = std::abs(declare_parameter<double>("irl_max_brake_amps", 4.0));
+    // eRPM per m/s, so the brake knows how fast the wheels are going.
+    speed_to_erpm_gain_ = declare_parameter<double>("speed_to_erpm_gain", 4614.0);
+    if (std::abs(speed_to_erpm_gain_) < 1.0)
+    {
+      RCLCPP_WARN(get_logger(), "speed_to_erpm_gain %.1f is ~0 - using 4614", speed_to_erpm_gain_);
+      speed_to_erpm_gain_ = 4614.0;
+    }
+    erpmPerMps = speed_to_erpm_gain_;
+    maxThrottleErpm = irl_max_throttle_erpm_;
 
     invert_steering_ = declare_parameter<bool>("invert_steering", false);
     // Servo range in the VESC's normalized 0..1 units. Defaults match
@@ -135,6 +149,15 @@ public:
       speed_pub = this->create_publisher<std_msgs::msg::Float64>("/commands/motor/speed", 1);
       brake_pub = this->create_publisher<std_msgs::msg::Float64>("/commands/motor/brake", 1);
       servo_pub = this->create_publisher<std_msgs::msg::Float64>("/commands/servo/position", 1);
+
+      // Wheel speed for the brake. The driver polls the VESC at 50 Hz.
+      core_sub = this->create_subscription<vesc_msgs::msg::VescStateStamped>(
+        "/sensors/core", rclcpp::SensorDataQoS(),
+        [this](vesc_msgs::msg::VescStateStamped::UniquePtr msg)
+        {
+          wheelSpeedMps = msg->state.speed / speed_to_erpm_gain_;
+          wheelSpeedTime = std::chrono::steady_clock::now();
+        });
     }
 
     // How long the /estop heartbeat may go missing before we brake. The
@@ -171,9 +194,9 @@ public:
     else
       RCLCPP_INFO(
         get_logger(),
-        "VESC output: throttle +1.0 = %.0f eRPM, -1.0 = %.1f A brake. "
+        "VESC output: throttle +1.0 = %.0f eRPM, -1.0 = %.1f A brake, wheel speed at %.0f eRPM per m/s. "
         "STOPPED BY DEFAULT - start killswitch_node and arm the remote to drive.",
-        irl_max_throttle_erpm_, irl_max_brake_amps_);
+        irl_max_throttle_erpm_, irl_max_brake_amps_, speed_to_erpm_gain_);
   }
 
 private:
@@ -323,6 +346,7 @@ private:
   bool sim_mode_ = false;
   double irl_max_throttle_erpm_ = 6000.0;
   double irl_max_brake_amps_ = 4.0;
+  double speed_to_erpm_gain_ = 4614.0;
   bool invert_steering_ = false;
   double servo_center_ = 0.5;
   double servo_min_ = 0.117;
@@ -341,6 +365,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscription;
   rclcpp::Subscription<vesc_msgs::msg::VescImuStamped>::SharedPtr imu_sub;
   vesc_msgs::msg::VescImuStamped::SharedPtr latest_imu_;
+  rclcpp::Subscription<vesc_msgs::msg::VescStateStamped>::SharedPtr core_sub;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr estop_sub;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr steering_pub;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr throttle_pub;
@@ -377,4 +402,19 @@ double scanTime()
 bool simMode()
 {
   return simOutput;
+}
+
+float wheelSpeed()
+{
+  // Stale after 10 missed 50 Hz polls: report unknown and let the lidar speed take over.
+  const double age = std::chrono::duration<double>(
+    std::chrono::steady_clock::now() - wheelSpeedTime).count();
+  return age < 0.2 ? static_cast<float>(std::max(0.0, wheelSpeedMps)) : -1.0f;
+}
+
+float speedToThrottle(float mps)
+{
+  return maxThrottleErpm > 0.0
+    ? static_cast<float>(mps * erpmPerMps / maxThrottleErpm)
+    : 0.0f;
 }
