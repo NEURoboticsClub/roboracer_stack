@@ -30,7 +30,8 @@ options = {
   num_subdivisions_per_laser_scan = 1,
   num_point_clouds = 0,
   lookup_transform_timeout_sec = 0.2,
-  submap_publish_period_sec = 0.3,
+  -- How often the submaps behind /map are re-sent. 0.3 made Foxglove lag.
+  submap_publish_period_sec = 0.1,
   pose_publish_period_sec = 5e-3,
   trajectory_publish_period_sec = 30e-3,
   rangefinder_sampling_ratio = 1.,
@@ -57,5 +58,26 @@ TRAJECTORY_BUILDER_2D.missing_data_ray_length = 10.0
 TRAJECTORY_BUILDER_2D.use_online_correlative_scan_matching = true
 TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.linear_search_window = 0.2
 TRAJECTORY_BUILDER_2D.real_time_correlative_scan_matcher.angular_search_window = math.rad(20.)
+
+-- Grid cell size, 0.05 m (default) -> 0.10 m. Four times fewer cells to match
+-- against and render, so matching and /map updates run faster. The cost is
+-- detail: a wall is located to the nearest 10 cm instead of 5 cm, which on a
+-- tight track is visible. Keep the occupancy grid node's -resolution in
+-- sim_launch.py the same.
+TRAJECTORY_BUILDER_2D.submaps.grid_options_2d.resolution = 0.10
+
+-- The motion filter. Every scan is still matched, but only scans that pass
+-- this filter are INSERTED into the map. Defaults are 0.2 m / 1 deg / 5 s,
+-- which at ~2 m/s inserts only ~10 scans a second and makes the map fill in
+-- slowly. Insert after 0.1 m, 0.5 deg, or 1 s, whichever comes first.
+TRAJECTORY_BUILDER_2D.motion_filter.max_distance_meters = 0.1
+TRAJECTORY_BUILDER_2D.motion_filter.max_angle_radians = math.rad(0.5)
+TRAJECTORY_BUILDER_2D.motion_filter.max_time_seconds = 1.0
+
+-- Global matching: how many inserted scans between pose-graph optimizations
+-- (the step that searches for loop closures and re-aligns the submaps).
+-- Default 90. With the denser insertion above, 90 nodes would be ~9 m of
+-- track between optimizations; 30 is ~3 m.
+POSE_GRAPH.optimize_every_n_nodes = 30
 
 return options

@@ -10,6 +10,15 @@ services:
       - "8765:8765"
     volumes:
       - ./ros_ws/src:/home/ros_ws/src
+    # What the onboard container launches on `docker compose up`. Overrides the
+    # Dockerfile's CMD, so changing it needs no image rebuild: onboard_setup.sh
+    # rebuilds ros_ws/src on every start, then execs this.
+    # Pick another bringup launch file, and pass it launch arguments, for one
+    # run with e.g.
+    #   ONBOARD_LAUNCH=sim_launch.py ONBOARD_ARGS="mapping:=true" docker compose up
+    # (String form, not a list, so ONBOARD_ARGS can hold several arguments, or
+    # none.)
+    command: ros2 launch bringup ${ONBOARD_LAUNCH:-sim_launch.py} ${ONBOARD_ARGS:-mapping:=true}
   devkit:
     image: "dheeshik/roboracer_neu:devkit"
     pull_policy: always

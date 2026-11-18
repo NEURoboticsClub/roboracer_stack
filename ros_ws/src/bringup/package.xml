@@ -23,6 +23,9 @@
   <exec_depend>foxglove_bridge</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>cartographer_ros</exec_depend>
+  <!-- scripts/imu_gravity_relay.py, scripts/scan_instant_relay.py -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -1,0 +1,227 @@
+# slam_toolbox profile for MAPPING IN THE AUTODRIVE SIM (sim_mapping_launch.py).
+#
+# ODOMETRY. slam_toolbox never subscribes to an Odometry topic; it reads
+# odom_frame -> base_frame from TF. The AutoDRIVE bridge broadcasts
+#   world -> roboracer_1 -> lidar
+# where world -> roboracer_1 is the simulator's own vehicle pose - the same
+# position + orientation it publishes on /autodrive/roboracer_1/odom. So using
+# the sim's odometry is just naming those frames here:
+#   odom_frame = world, base_frame = roboracer_1
+# and slam_toolbox publishes map -> world on top. Nothing else in the launch
+# file publishes odometry or TF.
+#
+# That odometry is GROUND TRUTH: no wheel slip, no drift. With scan matching
+# switched off entirely the map came out perfect, which proved two things: the
+# scan, the lidar transform and the timing are all right, and every bit of mess
+# in the map was the scan matcher overriding a correct odometry pose. That is
+# what this profile is built around.
+#
+# roboracer_1 is the REAR AXLE (same convention as base_link on the car), and
+# the bridge already broadcasts the lidar 0.2733 m forward of it, so there is no
+# lidar_x to get wrong in the sim.
+#
+# ---------------------------------------------------------------------------
+# HOW SCAN MATCHING IS SET UP HERE: trust odometry mid-lap, close the loop once.
+#
+# slam_toolbox (Karto underneath) matches scans in three places:
+#
+#   1. SEQUENTIAL matching - every keyframe, against the last few keyframes.
+#      This is the "running all the time mid-lap" part. It searches a small
+#      window around the odometry pose and moves the scan to wherever it fits
+#      best. On a track that window mostly holds two long parallel walls, and
+#      a scan fits a corridor almost equally well anywhere ALONG it, so the
+#      matcher slides along straights and the map stretches and doubles.
+#
+#   2. NEAR-CHAIN linking - every keyframe, against older parts of the map that
+#      happen to be within link_scan_maximum_distance. If one matches well
+#      enough, the new scan's pose is AVERAGED toward it. This is a second
+#      mid-lap correction, and the one that fires where the track runs close
+#      to itself.
+#
+#   3. LOOP CLOSURE - every keyframe, slam_toolbox LOOKS for older, unconnected
+#      parts of the map near the current pose. In practice that means the start
+#      of the lap, once you come back round to it. Only when a candidate passes
+#      every threshold does it add the constraint and re-optimize the whole
+#      graph. Nothing moves until then.
+#
+# slam_toolbox cannot turn off 1 and keep 3: use_scan_matching: false also stops
+# it building the pose graph, and loop closure works on that graph. So instead:
+#   1 is pinned to the odometry (tiny search window, heavy penalty for leaving
+#     the odometry pose), so it effectively just returns the odometry pose;
+#   2 is set so strict it should never fire mid-lap;
+#   3 is the only thing allowed to change the map, and only for a match that
+#     is close to the current pose, backed by a long run of consistent
+#     keyframes, sharp (not a corridor smear), and a very good fit.
+#
+# Karto does not compare against "the first scan" as such. It compares against
+# whatever part of the map near the current pose is NOT the stretch it just
+# drove, which at the end of a lap is the start. That is the closest it gets to
+# "only when the scan is really similar to the first one".
+#
+# With ground-truth odometry the closure has nothing to correct, so expect it
+# to move the map by ~nothing. The map with use_scan_matching: false is still
+# the best this sim can produce. The point of this profile is to exercise the
+# loop-closure thresholds without the matcher wrecking the map mid-lap.
+# ---------------------------------------------------------------------------
+slam_toolbox:
+  ros__parameters:
+
+    # Plugin params
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ROS Parameters
+    # The bridge stamps everything with the wall clock and nothing publishes
+    # /clock, so sim time stays OFF even though this is the sim.
+    use_sim_time: false
+    odom_frame: world
+    map_frame: map
+    base_frame: roboracer_1
+    scan_topic: /autodrive/roboracer_1/lidar
+    use_map_saver: true
+    mode: mapping
+
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.02
+    map_update_interval: 0.3
+    resolution: 0.05
+    # The sim lidar's range_max is 10.0 m. Keep this just UNDER it: Karto only
+    # uses a beam as an endpoint (a wall) when it is below max_laser_range, so a
+    # no-return that comes back as 10.0 clears free space instead of painting a
+    # ring of fake wall 10 m out.
+    max_laser_range: 9.5
+    minimum_time_interval: 0.1
+    transform_timeout: 0.3
+    # The bridge broadcasts its TF a moment BEFORE it publishes the scan from the
+    # same tick, so the transform needed to place a scan only exists once the
+    # NEXT tick arrives. With slam_toolbox's default queue of 1 that next scan
+    # evicts the waiting one and nearly every scan is dropped ("discarding
+    # message because the queue is full"). 10 is plenty of buffer.
+    scan_queue_size: 10
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+    enable_interactive_mode: true
+
+    # =========================================================================
+    # KEYFRAMES - which scans enter the map at all
+    # =========================================================================
+    # Must stay true or there is no pose graph and so no loop closure (see top).
+    use_scan_matching: true
+    # Measure travel from the centre of the scan's points rather than the
+    # sensor origin. Makes the travel checks below steadier through corners.
+    use_scan_barycenter: true
+    # A scan becomes a keyframe (a node in the graph) only once the car has
+    # moved this far OR turned this much since the last one. Smaller = denser
+    # map and graph, more CPU. 0.15 m / ~5.7 deg.
+    minimum_travel_distance: 0.15
+    minimum_travel_heading: 0.10
+
+    # =========================================================================
+    # 1. SEQUENTIAL MATCHING - pinned to the odometry
+    # =========================================================================
+    # The local map a new keyframe is matched against: the last
+    # scan_buffer_size keyframes, dropping any more than
+    # scan_buffer_maximum_scan_distance away. Mostly irrelevant once the
+    # matcher is pinned, but a smaller buffer is less to slide against.
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 3.0
+
+    # Position search: a square correlation_search_space_dimension metres
+    # across, centred on the odometry pose, stepped every ..._resolution metres.
+    # 0.1 = at most +/-5 cm from the odometry. Was 0.5 (+/-25 cm), which is
+    # plenty of room to slide along a corridor.
+    correlation_search_space_dimension: 0.1
+    correlation_search_space_resolution: 0.01
+    # Every scan point is scored against the local map blurred by a Gaussian of
+    # this standard deviation (metres). Wider = more forgiving, but a flatter
+    # score and a less certain best pose. Leave at the default.
+    correlation_search_space_smear_deviation: 0.1
+
+    # Angle search, shared by ALL matching (sequential and loop closure):
+    # try every coarse_angle_resolution step within +/-coarse_search_angle_offset
+    # of the odometry heading, then refine around the best one in steps of
+    # fine_search_angle_offset (despite the name, that one is a step size, not
+    # a range). +/-5 deg in 1 deg steps, refined to 0.2 deg. Was +/-20 deg.
+    coarse_search_angle_offset: 0.0873   # 5 deg
+    coarse_angle_resolution: 0.01745     # 1 deg
+    fine_search_angle_offset: 0.00349    # 0.2 deg
+
+    # The odometry penalty. Each candidate pose's score is multiplied by
+    #   1 - 0.2 * (distance from odometry)^2 / distance_variance_penalty
+    #   1 - 0.2 * (angle from odometry)^2    / angle_variance_penalty
+    # each floored at minimum_distance_penalty / minimum_angle_penalty.
+    # So SMALLER variance = trust the odometry MORE, and the floor is how good a
+    # far-off pose is still allowed to look. The defaults (0.5 / 1.0, floors
+    # 0.5 / 0.9) barely penalize anything inside the window: an angle error
+    # kept 90% of its score at any size. These are what let the matcher wander.
+    #
+    # Here: 2.5 cm off the odometry halves a pose's score, 1 deg off costs ~6%,
+    # and 3 deg off costs ~55%. With the floors near zero, being far from the
+    # odometry is never cheap.
+    distance_variance_penalty: 0.00025
+    angle_variance_penalty: 0.001
+    minimum_distance_penalty: 0.05
+    minimum_angle_penalty: 0.05
+
+    # When a match scores exactly 0, retry with the angle window widened by
+    # 20 deg, up to three times. That is a recovery for lost odometry, and with
+    # perfect odometry its only effect is to allow a wild jump. Off.
+    use_response_expansion: false
+
+    # =========================================================================
+    # 2. NEAR-CHAIN LINKING - effectively disabled mid-lap
+    # =========================================================================
+    # Each keyframe is matched against older runs of keyframes within
+    # link_scan_maximum_distance metres. A match scoring above
+    # link_match_minimum_response_fine (0-1, roughly the fraction of scan
+    # points landing on a wall) adds an edge AND averages the scan's pose
+    # toward it. 0.1 (default) accepts nearly anything. At 0.85 only a
+    # near-perfect overlap counts, which in practice is the start line.
+    link_match_minimum_response_fine: 0.85
+    link_scan_maximum_distance: 1.5
+
+    # =========================================================================
+    # 3. LOOP CLOSURE - the one correction that is allowed, and only when sure
+    # =========================================================================
+    do_loop_closing: true
+    # Where to look: older, unconnected keyframes within this many metres of
+    # the current pose estimate. It has to cover the drift at the closure point;
+    # with ground-truth odometry that is ~0, so keep it tight. A tight radius
+    # also leaves fewer wrong places to match (e.g. a parallel straight on the
+    # far side of a wall). Raise it if your odometry actually drifts (the real
+    # car's profile uses 12 m for ~20 deg/lap of drift).
+    loop_search_maximum_distance: 2.0
+    # The candidate must be a CHAIN of at least this many consecutive keyframes
+    # in that radius, not one stray scan. 15 keyframes x 0.15 m = ~2.25 m of
+    # track. Higher = more evidence required; the main guard against a FALSE
+    # closure, which folds the map onto itself and cannot be undone.
+    loop_match_minimum_chain_size: 15
+
+    # The loop matcher's own search window. Same meaning as the
+    # correlation_search_space_* above, but this search applies NO odometry
+    # penalty: every pose in the window competes equally. So the window must
+    # cover the drift and no more. Was 8 m. 2 m = +/-1 m.
+    loop_search_space_dimension: 2.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # Three gates a candidate must pass, in this order:
+    #  a) coarse match score above loop_match_minimum_response_coarse (0-1);
+    #  b) coarse match variance below loop_match_maximum_variance_coarse.
+    #     A corridor scores equally well at many positions along it, so its
+    #     match is spread out and has a large variance. A real return to a
+    #     distinctive spot gives one sharp peak. Lower = only accept sharp ones.
+    #     Default 3.0 lets almost anything through;
+    #  c) refined match score above loop_match_minimum_response_fine.
+    # Defaults are 0.35 / 3.0 / 0.45. The sim lidar is noise-free, so a true
+    # return to the start line should score well above these. If the loop
+    # NEVER closes, loosen the two response thresholds first (in 0.05 steps),
+    # then the variance. Leave the chain size alone.
+    loop_match_minimum_response_coarse: 0.55
+    loop_match_maximum_variance_coarse: 0.5
+    loop_match_minimum_response_fine: 0.70
